@@ -122,3 +122,19 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+DAHIR_TEST_01-token.txt
+
+DAHIR_TEST_02-token.txt
+
+DAHIR_TEST-token.txt
+
+DAHIR-token.txt
+
+mockup-Spacetraders.aseprite
+
+test1.py
+
+users.txt
+
+fullfiledAnswer/
