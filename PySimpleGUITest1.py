@@ -6,21 +6,22 @@ from utilistiesSpaceTraders import *
 
 class SpaceTrader:
     agent = ""
-    fleet = ["1"] # TODO : modifier pour enlever le "1" et ptetre initialiser mais normalement pas nécessaire car sera initialiser au moment ou on get la fleet
+    fleet = ["1"] # TODO : modifier pour enlever le "1" et ptetre initialiser mais normalement pas nécessaire car sera initialisé au moment ou on get la fleet
     token = ""
     faction = Faction.COSMIC
 
     contractindex = 0
     contractDeliverMaterialIndex = 0
 
+    # simplify the login when you already login once with token
     try:
-        with open('users.txt', 'r') as f:
-            usersRaw = f.read()
-            if (len(usersRaw) > 0):
-                defaultUsername = usersRaw.splitlines()[0]
-                #print(usersRaw.splitlines()[0])
-    except FileNotFoundError:
+        with open('datas.json', 'r') as f:
+            jsonData = json.load(f)
+            defaultUsername = jsonData['data'][0]['username']
+            print("default username updated : " + defaultUsername)
+    except Exception:
         defaultUsername = ""
+        print("default username not set : " + defaultUsername)
 
     # layouts
     layoutMainMenu = [  
@@ -110,8 +111,6 @@ class SpaceTrader:
     def displayMainWindow(self):
         userNamePrevLength = len(self.defaultUsername)
         userNameCurrLength = len(self.defaultUsername)
-        #factionPrevLength = 0
-        #factionCurrLength = 0
 
         while True:
             event, values = self.windowMainMenu.read()
@@ -120,7 +119,6 @@ class SpaceTrader:
                 return False
 
             userNameCurrLength = len(values['USERNAME'])
-            #factionCurrLength = len(values['FACTION'])
 
             #print(event)
 
@@ -137,11 +135,12 @@ class SpaceTrader:
                         print(respons.json()['status'])
                         agentInfo = requests.get((myAgentURL), headers = self.headersJson)
                         time.sleep(0.5)
+                        # TODO : si le token n'est pas connu enregistrer les infos
                         if (agentInfo.status_code == 200): # TODO : display les infos proprement
                             self.agent = Agent(agentInfo.json()['data'])
-                            print("agent name : " + agentInfo.json()['data']['symbol'])
-                            print("agent gold : " + str(agentInfo.json()['data']['credits']))
-                            print("agent faction : " + agentInfo.json()['data']['startingFaction'])
+                            #print("agent name : " + agentInfo.json()['data']['symbol'])
+                            #print("agent gold : " + str(agentInfo.json()['data']['credits']))
+                            #print("agent faction : " + agentInfo.json()['data']['startingFaction'])
                             self.windowMainMenu.hide()
                             return True
                     else:
@@ -150,13 +149,23 @@ class SpaceTrader:
                     self.windowMainMenu['INFO'].update("length of your username should be from 3 to 14, or token should be given")
                 else: # elif len(values['FACTION']) == 0:
                     try:
-                        with open(values['USERNAME'] + '-token.txt', 'r') as f:
-                            self.token = f.read()
-                            self.windowMainMenu['TOKEN'].update(self.token)
-                            self.windowMainMenu['INFO'].update("token filled, ready to connect")
+                        with open("datas.json", 'r') as f:
+                            found = False
+                            data = json.load(f)
+                            for i in data['data']:
+                                if (values['USERNAME'] == i['username']):
+                                    self.token = i['token']
+                                    self.windowMainMenu['TOKEN'].update(self.token)
+                                    self.windowMainMenu['INFO'].update("token filled, ready to connect")
+                                    found = True
+                                    break
+                            if not found:
+                                self.windowMainMenu['INFO'].update("Impossible to find associate token, try to register first")
                     except FileNotFoundError:
-                        print("The files associate with this username " + values['USERNAME'] + "does not exist")
+                        print("The files associate with this username 'datas.json' does not exist")
                         self.windowMainMenu['INFO'].update("Impossible to find associate token")
+                    except Exception as e:
+                        print ("??? data structure ??? : " + e.__str__)
 
             if event == "REGISTER":
                 if len(values['USERNAME']) >= 3 and len(values['USERNAME']) <= 14:
@@ -168,14 +177,44 @@ class SpaceTrader:
                         print(agentInfo.json())
                         time.sleep(0.5)
                         if (agentInfo.status_code == 201):
-                            json.dumps(agentInfo.json(), indent=2) # n'a pas marché
+                            json.dumps(agentInfo.json(), indent=2) # indent=2 n'a pas marché
                             self.token = agentInfo.json()['data']['token']
                             self.agent = Agent(agentInfo.json()['data']['agent'])
 
-                            with open(values['USERNAME'] + '-token.txt', 'w') as f:
-                                f.write(self.token)
-                            with open('users.txt', 'a+') as f:
-                                f.write("\n" + values['USERNAME'])
+                            try:
+                                with open("datas.json", 'r') as f:
+                                    data = json.load(f)
+                                    found = False
+                                    for i in data['data']:
+                                        if (values['USERNAME'] == i['username']):
+                                            i['token'] = self.token
+                                            with open('datas.json', 'w') as outfile:
+                                                json.dump(data, outfile, indent = 4)
+                                            self.windowMainMenu['TOKEN'].update(self.token)
+                                            self.windowMainMenu['INFO'].update("token updated and filled, ready to connect")
+                                            found = True
+                                            break
+                                    if not found:
+                                        print("new User")
+                                        uniqueDataJsonExample['username'] = self.agent.symbol
+                                        uniqueDataJsonExample['token'] = self.token
+                                        data['data'].append(uniqueDataJsonExample)
+                                        with open('datas.json', 'w') as outfile:
+                                            json.dump(data, outfile, indent = 4)
+                                        self.windowMainMenu['TOKEN'].update(self.token)
+                                        self.windowMainMenu['INFO'].update("token saved and filled, ready to connect")
+                            except FileNotFoundError:
+                                print("file not found")
+                                with open('datas.json', 'w') as outfile:
+                                    dataJsonExample['data']['username'] = self.agent.symbol
+                                    dataJsonExample['data']['token'] = self.token
+                                    json.dump(dataJsonExample, outfile)
+                                    
+                                self.windowMainMenu['TOKEN'].update(self.token)
+                                self.windowMainMenu['INFO'].update("file created, token saved and filled, ready to connect")
+
+                            except Exception as e:
+                                print ("??? data structure ??? : " + e.__str__)
 
                             self.windowMainMenu['TOKEN'].update(self.token)
                             self.windowMainMenu['INFO'].update("token filled, ready to connect")
@@ -198,24 +237,6 @@ class SpaceTrader:
                             self.windowMainMenu['USERNAME'].update(values['USERNAME'].upper())
                             self.windowMainMenu['INFO'].update("char uppered")
                             userNameCurrLength = len(values['USERNAME'])
-
-            """
-            if (factionCurrLength != factionPrevLength):
-
-                if ((len(values['FACTION']) > 0) and (values['FACTION'].isprintable())):
-
-                    for i, c in enumerate(values['FACTION']):
-
-                        if c not in ('qwertzuiopasdfghjklyxcvbnmQWERTZUIOPLKJHGFDSAYXCVBNM'):
-                            self.windowMainMenu['FACTION'].update(values['FACTION'][:i] + values['FACTION'][i+1:])
-                            self.windowMainMenu['INFO'].update("char not supported")
-
-                        if len(values['FACTION']) > 0 and values['FACTION'][i] in ('qwertzuiopasdfghjklyxcvbnm'): #uppercase the letters
-                            self.windowMainMenu['FACTION'].update(values['FACTION'].upper())
-                            self.windowMainMenu['INFO'].update("char uppered")
-                            factionCurrLength = len(values['FACTION'])
-
-            factionPrevLength = factionCurrLength # """
 
             userNamePrevLength = userNameCurrLength
         return False

@@ -23,6 +23,19 @@ dataRegister = {
     "symbol": ""
 }
 
+dataJsonExample = {
+    "data": [
+        {
+            "username": "userTest",
+            "token": "tokenTest"
+        }
+    ]
+}
+uniqueDataJsonExample = {
+    "username": "userTest",
+    "token": "tokenTest"
+}
+
 
 class MetaEnum(EnumMeta):
 
