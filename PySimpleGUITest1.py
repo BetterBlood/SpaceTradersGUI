@@ -58,7 +58,8 @@ class SpaceTrader:
         [sg.Text("0", enable_events=True, size=(10,1), key='GOLD')],
         [sg.Text('COSMIC', enable_events=True, size=(10,1), key='FACTION')]
         ]
-    can=sg.Canvas(size=(700,500), background_color='black', key='CANVAS')
+    canSize = (700,500)
+    can=sg.Canvas(size=canSize, background_color='black', key='CANVAS')
     middleInfos = [
         [
             sg.Button('Map', enable_events=True, key='MAP'), 
@@ -185,6 +186,9 @@ class SpaceTrader:
     """
     def getURLWayPointsfromSystem(self, shipNumber = 0):
         return systemsURL + "/" + self.fleet[shipNumber].nav.systemSymbol + "/waypoints"
+
+    def getURLSystems(self, systemSymbol):
+        return systemsURL + "/" + systemSymbol
 
     def getSystemFromWayPoint(self, waypoint):
         return waypoint[0:7] # TODO : split from end by '-' could be better in case of the lenght of systems symbol change 
@@ -354,6 +358,7 @@ class SpaceTrader:
         have_mine_drone = False
         shipYardWayPoint = ""
         shipYardHaveMiningDrone = False
+        systemInfo = ""
 
         while True:
             event, values = self.windowMainScene.read(timeout=10)
@@ -390,10 +395,11 @@ class SpaceTrader:
                 print("action auto !")
                 if (len(self.contracts) == 0):
                     print("recherche des infos concernant les contrats...")
+                    #print(self.contracts)
                     contractsInfo = requests.get((contractURL), headers = self.headersJson)
                     self.setSleepTimer()
                     if (contractsInfo.status_code == 200):
-                        #print(json.dumps(contractsInfo.json(), indent=2))
+                        print(json.dumps(contractsInfo.json(), indent=2))
                         for i in range(len(contractsInfo.json()['data'])):
                             self.contracts.append(Contract(contractsInfo.json()['data'][i]))
                     else :
@@ -464,19 +470,80 @@ class SpaceTrader:
 
 
                 self.setSleepTimer()
+                continue
 
             if event == "MAP":
+                # update button display
                 self.windowMainScene['MAP'].update(button_color = button_color_selected)
                 self.windowMainScene['MIDDLE_FLEET'].update(button_color = button_color_default)
                 for i in range(len(self.fleet)):
                     self.windowMainScene["MIDDLE_SHIP" + str(i + 1)].update(button_color = button_color_default)
+                    
+                tkc.delete("all")
+                if len(self.contracts) != 0:
+                    if (systemInfo == ""):
+                        systemInfo = requests.get(self.getURLSystems(self.getSystemFromWayPoint(self.contracts[0].terms.deliver[0].destinationSymbol)), headers = self.headersAuthAccept)
+                        self.setSleepTimer()
+
+                    # display sun :
+                    tkc.create_oval(self.canSize[0]/2 - 15, self.canSize[1]/2 - 15,
+                                    self.canSize[0]/2 + 15 , self.canSize[1]/2 + 15, fill='orange')
+                    tkc.create_text(self.canSize[0]/2, self.canSize[1]/2, 
+                                    text=systemInfo.json()['data']['type'], fill='white', font=('Arial Bold', 8))
+
+                    # display planets :
+                    tmpX = 0
+                    tmpY = 0
+                    count = 0
+                    for i in range(len(systemInfo.json()['data']['waypoints'])):
+                        sameCoord = False
+                        systemItem = systemInfo.json()['data']['waypoints'][i]
+                        fact = 4
+
+                        itemRadius = 20 # TODO : def en fonction du corps celeste
+                        
+                        xS = self.canSize[0]/2 + int(systemItem['x']) * fact - itemRadius/2
+                        yS = self.canSize[1]/2 + int(systemItem['y']) * fact - itemRadius/2
+                        xE = self.canSize[0]/2 + int(systemItem['x']) * fact + itemRadius/2
+                        yE = self.canSize[1]/2 + int(systemItem['y']) * fact + itemRadius/2
+
+                        if tmpX == xS and tmpY == yS:
+                            sameCoord = True
+                            count += 1
+                        else :
+                            count = 0
+
+                        print(i, systemItem)
+                        print(xS,yS,xE,yE)
+
+                        if (systemItem['type'] == 'PLANET' or systemItem['type'] == 'GAS_GIANT'):
+                            tkc.create_oval(xS, yS, xE, yE, fill='green')
+                            tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
+                                            self.canSize[1]/2 + int(systemItem['y']) * fact, 
+                                            text=str(i), fill='white', font=('Arial Bold', 12))
+                        elif (systemItem['type'] == 'MOON' or systemItem['type'] == 'ORBITAL_STATION') and sameCoord:
+                            ecart = count*5
+                            tkc.create_oval(xS-ecart, yS-ecart, xE+ecart, yE+ecart, outline='white')
+                        elif systemItem['type'] == 'ASTEROID_FIELD' or systemItem['type'] == 'JUMP_GATE':
+                            tkc.create_oval(xS, yS, xE, yE, fill='grey')
+                            tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
+                                            self.canSize[1]/2 + int(systemItem['y']) * fact, 
+                                            text=str(i), fill='white', font=('Arial Bold', 12))
+
+
+
+
+                        tmpX = xS
+                        tmpY = yS
+
 
                 # TODO : afficher les info sur la map
-                tkc.delete("all")
-                tkc.create_rectangle(100, 100, 600, 400, outline='white')
-                tkc.create_line(50, 50, 650, 450, fill='green', width=5)
-                tkc.create_oval(200,150,600,350, fill='red')
-                tkc.create_text(350, 250, text="Hello World", fill='white', font=('Arial Bold', 16))
+                #tkc.delete("all")
+                #tkc.create_rectangle(100, 100, 600, 400, outline='white')
+                #tkc.create_line(50, 50, 650, 450, fill='green', width=5)
+                #tkc.create_oval(0,100,200,200, fill='red')
+                #tkc.create_oval(300,200,200,300, fill='blue')
+                #tkc.create_text(350, 250, text="Hello World", fill='white', font=('Arial Bold', 16))
 
             if event == "MIDDLE_FLEET":
                 # TODO : afficher les infos sur la fleet
