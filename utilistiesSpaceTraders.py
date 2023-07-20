@@ -318,3 +318,9 @@ class Ship:
         self.registration = Registration(jsonInfo['registration'])
         self.cargo = Cargo(jsonInfo['cargo'])
         
+
+"""
+Systems necessities :
+"""
+
+

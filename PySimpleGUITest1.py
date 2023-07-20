@@ -58,7 +58,7 @@ class SpaceTrader:
         [sg.Text("0", enable_events=True, size=(10,1), key='GOLD')],
         [sg.Text('COSMIC', enable_events=True, size=(10,1), key='FACTION')]
         ]
-    canSize = (700,500)
+    canSize = (700,700)
     can=sg.Canvas(size=canSize, background_color='black', key='CANVAS')
     middleInfos = [
         [
@@ -106,7 +106,7 @@ class SpaceTrader:
             ]
         ]
         
-        self.can=sg.Canvas(size=(700,500), background_color='black', key='CANVAS')
+        self.can=sg.Canvas(size=(700,700), background_color='black', key='CANVAS')
 
         middleButtons = []
         middleButtons.append(sg.Button('Map', enable_events=True, key='MAP'))
@@ -124,7 +124,7 @@ class SpaceTrader:
         layoutMainScene = [
             [sg.Column(inGameInfos, vertical_alignment='top'), sg.VSeparator(), sg.Column(middleInfos, vertical_alignment='center')]
         ]
-        return sg.Window('SpaceTradersGUI with pySimpleGUI', layoutMainScene, size=(960, 540), finalize=True)
+        return sg.Window('SpaceTradersGUI with pySimpleGUI', layoutMainScene, size=(960, 750), finalize=True)
 
     def setShipsURL(self, realShipname):
         self.shipsURL = "/my/ships"
@@ -341,10 +341,126 @@ class SpaceTrader:
             userNamePrevLength = userNameCurrLength
         return False
 
+    def drawSun(self, tkc, sunType):
+        # display sun :
+        tkc.create_oval(self.canSize[0]/2 - 15, self.canSize[1]/2 - 15,
+                        self.canSize[0]/2 + 15 , self.canSize[1]/2 + 15, fill='orange')
+        tkc.create_text(self.canSize[0]/2, self.canSize[1]/2, 
+                        text=sunType, fill='white', font=('Arial Bold', 8))
+    
+    def displayPlanets(self, tkc, wayPoints):
+        tmpX = 0
+        tmpY = 0
+        count = 0
+
+        for i in range(len(wayPoints)):
+            sameCoord = False
+            systemItem = wayPoints[i]
+            fact = 4
+
+            itemRadius = 20 # TODO : def en fonction du corps celeste
+            systemCenterX = self.canSize[0]/2 + int(systemItem['x']) * fact
+            systemCenterY = self.canSize[1]/2 + int(systemItem['y']) * fact
+
+            xS = systemCenterX - itemRadius/2
+            yS = systemCenterY - itemRadius/2
+            xE = systemCenterX + itemRadius/2
+            yE = systemCenterY + itemRadius/2
+
+            if tmpX == xS and tmpY == yS:
+                sameCoord = True
+                count += 1
+            else :
+                count = 0
+
+            print(i, systemItem)
+            print(xS,yS,xE,yE)
+
+            if (systemItem['type'] == 'PLANET'):
+                tkc.create_oval(xS, yS, xE, yE, fill='green')
+                tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
+                                self.canSize[1]/2 + int(systemItem['y']) * fact, 
+                                text=str(i), fill='white', font=('Arial Bold', 12))
+                
+            elif systemItem['type'] == 'GAS_GIANT' :
+                tkc.create_oval(xS, yS, xE, yE, fill='#b5651d')
+                tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
+                                self.canSize[1]/2 + int(systemItem['y']) * fact, 
+                                text=str(i), fill='black', font=('Arial Bold', 12))
+                
+            elif systemItem['type'] == 'NEBULA' :
+                tkc.create_oval(xS, yS, xE, yE, fill='yellow')
+                tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
+                                self.canSize[1]/2 + int(systemItem['y']) * fact, 
+                                text=str(i), fill='black', font=('Arial Bold', 12))
+                
+            elif systemItem['type'] == 'GRAVITY_WELL' :
+                tkc.create_line(xS, yS, xE, yE, fill='red')
+                tkc.create_line(xS, yE, xE, yS, fill='red')
+                tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
+                                self.canSize[1]/2 + int(systemItem['y']) * fact, 
+                                text=str(i), fill='black', font=('Arial Bold', 12))
+            
+            elif sameCoord :
+                if (systemItem['type'] == 'MOON'):
+                    gap = 5
+                    distanceToPlanet = count*gap
+                    moonDiagonal = 4
+                    # trajectory :
+                    tkc.create_oval(xS-distanceToPlanet, yS-distanceToPlanet, xE+distanceToPlanet, yE+distanceToPlanet, outline='white')
+                    # moon :
+                    tkc.create_oval(self.canSize[0]/2 + int(systemItem['x']) * fact + itemRadius/2 + distanceToPlanet - moonDiagonal/2, 
+                                    self.canSize[1]/2 + int(systemItem['y']) * fact - moonDiagonal/2, 
+                                    self.canSize[0]/2 + int(systemItem['x']) * fact + itemRadius/2 + distanceToPlanet + moonDiagonal/2, 
+                                    self.canSize[1]/2 + int(systemItem['y']) * fact + moonDiagonal/2, fill='grey')
+                    
+                elif systemItem['type'] == 'ORBITAL_STATION':
+                    gap = 5
+                    distanceToPlanet = count*gap
+                    moonDiagonal = 4
+                    # trajectory :
+                    tkc.create_oval(xS-distanceToPlanet, yS-distanceToPlanet, xE+distanceToPlanet, yE+distanceToPlanet, outline='white')
+                    # orbital station :
+                    tkc.create_rectangle(self.canSize[0]/2 + int(systemItem['x']) * fact + itemRadius/2 + distanceToPlanet - moonDiagonal/2, 
+                                    self.canSize[1]/2 + int(systemItem['y']) * fact - moonDiagonal/2, 
+                                    self.canSize[0]/2 + int(systemItem['x']) * fact + itemRadius/2 + distanceToPlanet + moonDiagonal/2, 
+                                    self.canSize[1]/2 + int(systemItem['y']) * fact + moonDiagonal/2, fill='grey')
+
+            elif systemItem['type'] == 'ASTEROID_FIELD' :
+                tkc.create_oval(xS, yS, xE, yE, fill='grey')
+                tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
+                                self.canSize[1]/2 + int(systemItem['y']) * fact, 
+                                text=str(i), fill='white', font=('Arial Bold', 12))
+                
+            elif systemItem['type'] == 'DEBRIS_FIELD':
+                tkc.create_rectangle(xS, yS, xE, yE, fill='grey')
+                tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
+                                self.canSize[1]/2 + int(systemItem['y']) * fact, 
+                                text=str(i), fill='white', font=('Arial Bold', 12))
+                
+            elif systemItem['type'] == 'JUMP_GATE':
+                tkc.create_oval(xS, yS, xE, yE, fill='lightblue')
+                jumpGateWidth = 3
+                tkc.create_oval(xS+jumpGateWidth, yS+jumpGateWidth, xE-jumpGateWidth, yE-jumpGateWidth, fill='black')
+                tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
+                                self.canSize[1]/2 + int(systemItem['y']) * fact, 
+                                text=str(i), fill='white', font=('Arial Bold', 12))
+
+
+            tmpX = xS
+            tmpY = yS
+
+    def drawSystem(self, systemInfo):
+        systemDatas = systemInfo.json()['data']
+        tkc = self.can.TKCanvas
+        self.drawSun(tkc, systemDatas['type']) # display sun
+        self.displayPlanets(tkc, systemDatas['waypoints']) # display planets
+
+
     def displayMainScene(self):
 
         self.windowMainScene = self.initLayoutMainScene()
-        tkc=self.can.TKCanvas
+        tkc = self.can.TKCanvas
         button_color_default = ('white','darkRed')
         button_color_selected = ('white','darkBlue')
         
@@ -485,57 +601,8 @@ class SpaceTrader:
                         systemInfo = requests.get(self.getURLSystems(self.getSystemFromWayPoint(self.contracts[0].terms.deliver[0].destinationSymbol)), headers = self.headersAuthAccept)
                         self.setSleepTimer()
 
-                    # display sun :
-                    tkc.create_oval(self.canSize[0]/2 - 15, self.canSize[1]/2 - 15,
-                                    self.canSize[0]/2 + 15 , self.canSize[1]/2 + 15, fill='orange')
-                    tkc.create_text(self.canSize[0]/2, self.canSize[1]/2, 
-                                    text=systemInfo.json()['data']['type'], fill='white', font=('Arial Bold', 8))
-
-                    # display planets :
-                    tmpX = 0
-                    tmpY = 0
-                    count = 0
-                    for i in range(len(systemInfo.json()['data']['waypoints'])):
-                        sameCoord = False
-                        systemItem = systemInfo.json()['data']['waypoints'][i]
-                        fact = 4
-
-                        itemRadius = 20 # TODO : def en fonction du corps celeste
-                        
-                        xS = self.canSize[0]/2 + int(systemItem['x']) * fact - itemRadius/2
-                        yS = self.canSize[1]/2 + int(systemItem['y']) * fact - itemRadius/2
-                        xE = self.canSize[0]/2 + int(systemItem['x']) * fact + itemRadius/2
-                        yE = self.canSize[1]/2 + int(systemItem['y']) * fact + itemRadius/2
-
-                        if tmpX == xS and tmpY == yS:
-                            sameCoord = True
-                            count += 1
-                        else :
-                            count = 0
-
-                        print(i, systemItem)
-                        print(xS,yS,xE,yE)
-
-                        if (systemItem['type'] == 'PLANET' or systemItem['type'] == 'GAS_GIANT'):
-                            tkc.create_oval(xS, yS, xE, yE, fill='green')
-                            tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
-                                            self.canSize[1]/2 + int(systemItem['y']) * fact, 
-                                            text=str(i), fill='white', font=('Arial Bold', 12))
-                        elif (systemItem['type'] == 'MOON' or systemItem['type'] == 'ORBITAL_STATION') and sameCoord:
-                            ecart = count*5
-                            tkc.create_oval(xS-ecart, yS-ecart, xE+ecart, yE+ecart, outline='white')
-                        elif systemItem['type'] == 'ASTEROID_FIELD' or systemItem['type'] == 'JUMP_GATE':
-                            tkc.create_oval(xS, yS, xE, yE, fill='grey')
-                            tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
-                                            self.canSize[1]/2 + int(systemItem['y']) * fact, 
-                                            text=str(i), fill='white', font=('Arial Bold', 12))
-
-
-
-
-                        tmpX = xS
-                        tmpY = yS
-
+                    self.drawSystem(systemInfo)
+                    
 
                 # TODO : afficher les info sur la map
                 #tkc.delete("all")
