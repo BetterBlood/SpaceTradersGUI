@@ -743,25 +743,30 @@ class SpaceTrader:
                 print("action auto !")
                 if (len(self.contracts) == 0):
                     print("recherche des infos concernant les contrats...")
-                    self.orders.append(Order(False, RequestType('LIST_CONTRACTS'), contractURL, headers=self.headersJson))
+                    if len(self.orders) == 0:
+                        self.orders.append(Order(False, RequestType('LIST_CONTRACTS'), contractURL, headers=self.headersJson))
                 elif (len(self.contracts) == 1):
                     contract = self.contracts[0]
                     print("1 contract disponible, accepted : " + str(contract.accepted))
 
                     if (not contract.accepted):
-                        self.acceptContract(0)
+                        if len(self.orders) == 0:
+                            self.acceptContract(0)
                     elif not self.have_mine_drone :
                         print("no mining drone !")
 
                         if (self.shipYardHaveMiningDrone): # buy the mining drone
-                            self.orders.append(Order(True, RequestType('PURCHASE_SHIP'), shipsURL, headers=self.headersAuthJsonAccept, json=dataBuyShip))  
+                            if len(self.orders) == 0:
+                                self.orders.append(Order(True, RequestType('PURCHASE_SHIP'), shipsURL, headers=self.headersAuthJsonAccept, json=dataBuyShip))  
                         elif (self.shipYardWayPoint != ""): # si on a le way point d'un SHIPYARD on regarder si SHIP_MINING_DRONE dispo
                             #print(shipYardWayPoint)
-                            self.orders.append(Order(True, RequestType('GET_SHIPYARD'), 
+                            if len(self.orders) == 0:
+                                self.orders.append(Order(True, RequestType('GET_SHIPYARD'), 
                                                         self.getURLShipyardFromWayPoint(self.shipYardWayPoint), 
                                                         headers=self.headersAuthAccept))
                         else : # vérifier si SHIPYARD dans le system
-                            self.orders.append(Order(False, RequestType('LIST_WAYPOINTS_IN_SYSTEM'), self.getURLWayPointsfromShipSystem(), headers=self.headersAuthAccept))
+                            if len(self.orders) == 0:  
+                                self.orders.append(Order(False, RequestType('LIST_WAYPOINTS_IN_SYSTEM'), self.getURLWayPointsfromShipSystem(), headers=self.headersAuthAccept))
                                 
                     else :
                         # pour l'instant on quitte le mode auto pour économiser la bande passante
