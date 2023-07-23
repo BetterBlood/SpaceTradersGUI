@@ -1,4 +1,6 @@
 from enum import EnumMeta, Enum
+import requests
+import json
 
 token = ""
 https = "https://api.spacetraders.io/v2"
@@ -54,7 +56,6 @@ uniqueDataJsonExample = {
 
 
 class MetaEnum(EnumMeta):
-
     def __contains__(self, other):
         try:
             self(other)
@@ -83,6 +84,55 @@ class Faction(str, Enum, metaclass=MetaEnum):
     ANCIENTS = 'ANCIENTS'
     SHADOW = 'SHADOW'
     ETHEREAL = 'ETHEREAL'
+
+"""
+utilities
+"""
+
+class Trait:
+    def __init__(self, jsonInfo):
+        self.symbol = jsonInfo['symbol']
+        self.name = jsonInfo['name']
+        self.description = jsonInfo['description']
+
+class Chart:
+    def __init__(self, jsonInfo):
+        self.waypointSymbol = jsonInfo['waypointSymbol']
+        self.submittedBy = jsonInfo['submittedBy']
+        self.submittedOn = jsonInfo['submittedOn']
+
+
+class WayPoint:
+    def __init__(self, jsonInfo):
+        self.symbol = jsonInfo['symbol']
+        self.type = jsonInfo['type']
+        self.x = jsonInfo['x']
+        self.y = jsonInfo['y']
+
+        if 'systemSymbol' in jsonInfo:
+            self.systemSymbol = jsonInfo['systemSymbol']
+        else :
+            self.systemSymbol = ""
+
+        self.orbitals = []
+        if 'orbitals' in jsonInfo:
+            for i in range(len(jsonInfo['orbitals'])):
+                self.orbitals.append(jsonInfo['orbitals'][i]['symbol'])
+        
+        if 'faction' in jsonInfo:
+            self.faction = jsonInfo['faction']['symbol']
+        else :
+            self.faction = ""
+
+        self.traits = []
+        if 'traits' in jsonInfo:
+            for i in range(len(jsonInfo['traits'])):
+                self.traits.append(Trait(jsonInfo['traits'][i]))
+
+        if 'chart' in jsonInfo:
+            self.chart = Chart(jsonInfo['chart'])
+        else :
+            self.chart = None
 
 """
 Contract necessities
@@ -127,14 +177,6 @@ class Contract:
 Fleet necessities :
 """
 
-class Coord:
-    def __init__(self, jsonInfo):
-        self.symbol = jsonInfo['symbol']
-        self.type = jsonInfo['type']
-        self.systemSymbol = jsonInfo['systemSymbol']
-        self.x = jsonInfo['x']
-        self.y = jsonInfo['y']
-
 class Requirement:
     def __init__(self, jsonInfo):
         if 'power' in jsonInfo:
@@ -154,8 +196,8 @@ class Requirement:
 
 class Route:
     def __init__(self, jsonInfo):
-        self.departure = Coord(jsonInfo['departure'])
-        self.destination = Coord(jsonInfo['destination'])
+        self.departure = WayPoint(jsonInfo['departure'])
+        self.destination = WayPoint(jsonInfo['destination'])
         self.arrival = jsonInfo['arrival']
         self.departureTime = jsonInfo['departureTime']
 
@@ -318,9 +360,111 @@ class Ship:
         self.registration = Registration(jsonInfo['registration'])
         self.cargo = Cargo(jsonInfo['cargo'])
         
-
 """
 Systems necessities :
 """
 
+class System:
+    def __init__(self, jsonInfo):
+        self.symbol = jsonInfo['symbol']
+        self.sectorSymbol = jsonInfo['sectorSymbol']
+        self.type = jsonInfo['type']
+        self.x = jsonInfo['x']
+        self.y = jsonInfo['y']
+
+        self.wayPoints = []
+        for i in range(len(jsonInfo['waypoints'])):
+            self.wayPoints.append(WayPoint(jsonInfo['waypoints'][i]))
+
+        self.factions = []
+        for i in range(len(jsonInfo['factions'])):
+            self.factions.append(jsonInfo['factions'][i])
+
+"""
+Factions necessities :
+"""
+
+class FactionClass:
+    def __init__(self, jsonInfo):
+        self.symbol = jsonInfo['symbol']
+        self.name = jsonInfo['name']
+        self.description = jsonInfo['description']
+        self.headquarters = jsonInfo['headquarters']
+
+        self.traits = []
+        for i in range(len(jsonInfo['traits'])):
+            self.traits.append(Trait(jsonInfo['traits'][i]))
+
+        self.isRecruiting = jsonInfo['isRecruiting']
+
+"""
+Requests
+"""
+
+class RequestType(str, Enum):
+    GET_STATUS = 'GET_STATUS'
+    REGISTER_NEW_AGENT = 'REGISTER_NEW_AGENT'
+    GET_AGENT = 'GET_AGENT'
+    LIST_AGENTS = 'LIST_AGENTS'
+    GET_PUBLIC_AGENT = 'GET_PUBLIC_AGENT'
+    LIST_CONTRACTS = 'LIST_CONTRACTS'
+    GET_CONTRACT = 'GET_CONTRACT'
+    ACCEPT_CONTRACT = 'ACCEPT_CONTRACT'
+    DELIVER_CARGO_TO_CONTRACT = 'DELIVER_CARGO_TO_CONTRACT'
+    FULFILL_CONTRACT = 'FULFILL_CONTRACT'
+    LIST_FACTIONS = 'LIST_FACTIONS'
+    GET_FACTION = 'GET_FACTION'
+    LIST_SHIPS = 'LIST_SHIPS'
+    PURCHASE_SHIP = 'PURCHASE_SHIP'
+    GET_SHIP = 'GET_SHIP'
+    GET_SHIP_CARGO = 'GET_SHIP_CARGO'
+    ORBIT_SHIP = 'ORBIT_SHIP'
+    SHIP_REFINE = 'SHIP_REFINE'
+    CREATE_CHART = 'CREATE_CHART'
+    GET_SHIP_COOLDOWN = 'GET_SHIP_COOLDOWN'
+    DOCK_SHIP = 'DOCK_SHIP'
+    CREATE_SURVEY = 'CREATE_SURVEY'
+    EXTRACT_RESOURCES = 'EXTRACT_RESOURCES'
+    JETTISON_CARGO = 'JETTISON_CARGO'
+    JUMP_SHIP = 'JUMP_SHIP'
+    NAVIGATE_SHIP = 'NAVIGATE_SHIP'
+    PATCH_SHIP_NAV = 'PATCH_SHIP_NAV'
+    GET_SHIP_NAV = 'GET_SHIP_NAV'
+    WARP_SHIP = 'WARP_SHIP'
+    SELL_CARGO = 'SELL_CARGO'
+    SCAN_SYSTEMS = 'SCAN_SYSTEMS'
+    SCAN_WAYPOINTS = 'SCAN_WAYPOINTS'
+    SCAN_SHIPS = 'SCAN_SHIPS'
+    REFUEL_SHIP = 'REFUEL_SHIP'
+    PURCHASE_CARGO = 'PURCHASE_CARGO'
+    TRANSFER_CARGO = 'TRANSFER_CARGO'
+    NEGOTIATE_CONTRACT = 'NEGOTIATE_CONTRACT'
+    GET_MOUNTS = 'GET_MOUNTS'
+    INSTALL_MOUNT = 'INSTALL_MOUNT'
+    REMOVE_MOUNT = 'REMOVE_MOUNT'
+    LIST_SYSTEMS = 'LIST_SYSTEMS'
+    GET_SYSTEM = 'GET_SYSTEM'
+    LIST_WAYPOINTS_IN_SYSTEM = 'LIST_WAYPOINTS_IN_SYSTEM'
+    GET_WAYPOINT = 'GET_WAYPOINT'
+    GET_MARKET = 'GET_MARKET'
+    GET_SHIPYARD = 'GET_SHIPYARD'
+    GET_JUMP_GATE = 'GET_JUMP_GATE'
+
+
+class Order:
+    def __init__(self, isPost=True, requestType='GET_STATUS', url="", headers="", json=""):
+        self.requestType = requestType
+        self.isPost = isPost
+        self.url = url
+        self.headers = headers
+        self.json = json
+    
+    def doRequest(self):
+        if self.isPost :
+            return requests.post((self.url), headers=self.headers, json=self.json)
+        else:
+            return requests.get((self.url), headers=self.headers)
+    
+    def displayContent(self):
+        print(self.isPost, self.url, self.headers, self.json)
 

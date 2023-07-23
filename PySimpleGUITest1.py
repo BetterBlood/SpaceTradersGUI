@@ -1,16 +1,20 @@
 import PySimpleGUI as sg
-import requests
-import json
 import time
+import random
+from collections import deque
 from utilistiesSpaceTraders import *
 
 class SpaceTrader:
+    orders = deque()
     agent = ""
     fleet = [] # TODO : modifier pour enlever le "1" et ptetre initialiser mais normalement pas nécessaire car sera initialisé au moment ou on get la fleet
     token = ""
     faction = Faction.COSMIC
     contracts = []
     currentLocation = ""
+    shipYardWayPoint = ""
+    shipYardHaveMiningDrone = False
+    have_mine_drone = False
     
     auto_mode = False
 
@@ -71,6 +75,7 @@ class SpaceTrader:
     layoutMainScene = [
         [sg.Column(inGameInfos, vertical_alignment='top'), sg.VSeparator(), sg.Column(middleInfos, vertical_alignment='center')]
     ]
+    tkc = can.TKCanvas
 
     sg.theme('LightBrown13') 
     # Create the Window
@@ -124,6 +129,9 @@ class SpaceTrader:
         layoutMainScene = [
             [sg.Column(inGameInfos, vertical_alignment='top'), sg.VSeparator(), sg.Column(middleInfos, vertical_alignment='center')]
         ]
+
+        self.tkc = self.can.TKCanvas
+
         return sg.Window('SpaceTradersGUI with pySimpleGUI', layoutMainScene, size=(960, 750), finalize=True)
 
     def setShipsURL(self, realShipname):
@@ -165,15 +173,7 @@ class SpaceTrader:
         self.sleep_start_time = self.current_time
 
     def acceptContract(self, contractIndex = 0):
-        contractAccepteURL = self.getURLContractVerb(self.contracts[contractIndex].id)
-        r = requests.post((contractAccepteURL), headers = self.headersAuthJsonAccept)
-        self.setSleepTimer()
-        if (r.status_code == 200):
-            print("contract accepted !!!")
-            self.contracts[contractIndex] = Contract(r.json()['data']['contract'])
-        elif (r['error']['code'] == 4501): # normaly useless, cause contracts is updated so it shouldn't ask to accept if already done
-            print("contract already accepted !") 
-            self.contracts[contractIndex].accepted = True
+        self.orders.append(Order(True, RequestType('ACCEPT_CONTRACT'), self.getURLContractVerb(self.contracts[contractIndex].id), headers=self.headersAuthJsonAccept))
 
     """
     verb can be : 'accept', 'deliver' or 'fulfill' ('accept' by default)
@@ -181,17 +181,20 @@ class SpaceTrader:
     def getURLContractVerb(self, contractId, verb="accept"):
         return contractURL + "/" + contractId + "/" + verb
 
+    def getShipSystem(self, shipNumber = 0):
+        return self.fleet[shipNumber].nav.systemSymbol
+
     """
     shipNumber can't be greater than len(fleet) - 1
     """
-    def getURLWayPointsfromSystem(self, shipNumber = 0):
-        return systemsURL + "/" + self.fleet[shipNumber].nav.systemSymbol + "/waypoints"
+    def getURLWayPointsfromShipSystem(self, shipNumber = 0):
+        return systemsURL + "/" + self.getShipSystem(shipNumber) + "/waypoints"
 
     def getURLSystems(self, systemSymbol):
         return systemsURL + "/" + systemSymbol
 
     def getSystemFromWayPoint(self, waypoint):
-        return waypoint[0:7] # TODO : split from end by '-' could be better in case of the lenght of systems symbol change 
+        return waypoint.rsplit('-',1)[0]
 
     def getURLShipyardFromWayPoint(self, waypoint):
         return systemsURL + "/" + self.getSystemFromWayPoint(waypoint) + "/waypoints/" + waypoint + "/shipyard"
@@ -222,7 +225,7 @@ class SpaceTrader:
                     time.sleep(0.5)
                     if (respons.status_code == 200):
                         print("connected !!!")
-                        print(respons.json()['status'])
+                        print(json.dumps(respons.json(), indent=2))
                         agentInfo = requests.get((myAgentURL), headers = self.headersJson)
                         time.sleep(0.5)
                         # TODO : si le token n'est pas connu enregistrer les infos
@@ -341,14 +344,14 @@ class SpaceTrader:
             userNamePrevLength = userNameCurrLength
         return False
 
-    def drawSun(self, tkc, sunType):
+    def drawSun(self, sunType):
         # display sun :
-        tkc.create_oval(self.canSize[0]/2 - 15, self.canSize[1]/2 - 15,
+        self.tkc.create_oval(self.canSize[0]/2 - 15, self.canSize[1]/2 - 15,
                         self.canSize[0]/2 + 15 , self.canSize[1]/2 + 15, fill='orange')
-        tkc.create_text(self.canSize[0]/2, self.canSize[1]/2, 
+        self.tkc.create_text(self.canSize[0]/2, self.canSize[1]/2, 
                         text=sunType, fill='white', font=('Arial Bold', 8))
     
-    def displayPlanets(self, tkc, wayPoints):
+    def displayPlanets(self, wayPoints):
         tmpX = 0
         tmpY = 0
         count = 0
@@ -377,27 +380,27 @@ class SpaceTrader:
             print(xS,yS,xE,yE)
 
             if (systemItem['type'] == 'PLANET'):
-                tkc.create_oval(xS, yS, xE, yE, fill='green')
-                tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
+                self.tkc.create_oval(xS, yS, xE, yE, fill='green')
+                self.tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
                                 self.canSize[1]/2 + int(systemItem['y']) * fact, 
                                 text=str(i), fill='white', font=('Arial Bold', 12))
                 
             elif systemItem['type'] == 'GAS_GIANT' :
-                tkc.create_oval(xS, yS, xE, yE, fill='#b5651d')
-                tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
+                self.tkc.create_oval(xS, yS, xE, yE, fill='#b5651d')
+                self.tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
                                 self.canSize[1]/2 + int(systemItem['y']) * fact, 
                                 text=str(i), fill='black', font=('Arial Bold', 12))
                 
             elif systemItem['type'] == 'NEBULA' :
-                tkc.create_oval(xS, yS, xE, yE, fill='yellow')
-                tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
+                self.tkc.create_oval(xS, yS, xE, yE, fill='yellow')
+                self.tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
                                 self.canSize[1]/2 + int(systemItem['y']) * fact, 
                                 text=str(i), fill='black', font=('Arial Bold', 12))
                 
             elif systemItem['type'] == 'GRAVITY_WELL' :
-                tkc.create_line(xS, yS, xE, yE, fill='red')
-                tkc.create_line(xS, yE, xE, yS, fill='red')
-                tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
+                self.tkc.create_line(xS, yS, xE, yE, fill='red')
+                self.tkc.create_line(xS, yE, xE, yS, fill='red')
+                self.tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
                                 self.canSize[1]/2 + int(systemItem['y']) * fact, 
                                 text=str(i), fill='black', font=('Arial Bold', 12))
             
@@ -407,9 +410,9 @@ class SpaceTrader:
                     distanceToPlanet = count*gap
                     moonDiagonal = 4
                     # trajectory :
-                    tkc.create_oval(xS-distanceToPlanet, yS-distanceToPlanet, xE+distanceToPlanet, yE+distanceToPlanet, outline='white')
+                    self.tkc.create_oval(xS-distanceToPlanet, yS-distanceToPlanet, xE+distanceToPlanet, yE+distanceToPlanet, outline='white')
                     # moon :
-                    tkc.create_oval(self.canSize[0]/2 + int(systemItem['x']) * fact + itemRadius/2 + distanceToPlanet - moonDiagonal/2, 
+                    self.tkc.create_oval(self.canSize[0]/2 + int(systemItem['x']) * fact + itemRadius/2 + distanceToPlanet - moonDiagonal/2, 
                                     self.canSize[1]/2 + int(systemItem['y']) * fact - moonDiagonal/2, 
                                     self.canSize[0]/2 + int(systemItem['x']) * fact + itemRadius/2 + distanceToPlanet + moonDiagonal/2, 
                                     self.canSize[1]/2 + int(systemItem['y']) * fact + moonDiagonal/2, fill='grey')
@@ -419,30 +422,30 @@ class SpaceTrader:
                     distanceToPlanet = count*gap
                     moonDiagonal = 4
                     # trajectory :
-                    tkc.create_oval(xS-distanceToPlanet, yS-distanceToPlanet, xE+distanceToPlanet, yE+distanceToPlanet, outline='white')
+                    self.tkc.create_oval(xS-distanceToPlanet, yS-distanceToPlanet, xE+distanceToPlanet, yE+distanceToPlanet, outline='white')
                     # orbital station :
-                    tkc.create_rectangle(self.canSize[0]/2 + int(systemItem['x']) * fact + itemRadius/2 + distanceToPlanet - moonDiagonal/2, 
+                    self.tkc.create_rectangle(self.canSize[0]/2 + int(systemItem['x']) * fact + itemRadius/2 + distanceToPlanet - moonDiagonal/2, 
                                     self.canSize[1]/2 + int(systemItem['y']) * fact - moonDiagonal/2, 
                                     self.canSize[0]/2 + int(systemItem['x']) * fact + itemRadius/2 + distanceToPlanet + moonDiagonal/2, 
                                     self.canSize[1]/2 + int(systemItem['y']) * fact + moonDiagonal/2, fill='grey')
 
             elif systemItem['type'] == 'ASTEROID_FIELD' :
-                tkc.create_oval(xS, yS, xE, yE, fill='grey')
-                tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
+                self.tkc.create_oval(xS, yS, xE, yE, fill='grey')
+                self.tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
                                 self.canSize[1]/2 + int(systemItem['y']) * fact, 
                                 text=str(i), fill='white', font=('Arial Bold', 12))
                 
             elif systemItem['type'] == 'DEBRIS_FIELD':
-                tkc.create_rectangle(xS, yS, xE, yE, fill='grey')
-                tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
+                self.tkc.create_rectangle(xS, yS, xE, yE, fill='grey')
+                self.tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
                                 self.canSize[1]/2 + int(systemItem['y']) * fact, 
                                 text=str(i), fill='white', font=('Arial Bold', 12))
                 
             elif systemItem['type'] == 'JUMP_GATE':
-                tkc.create_oval(xS, yS, xE, yE, fill='lightblue')
+                self.tkc.create_oval(xS, yS, xE, yE, fill='lightblue')
                 jumpGateWidth = 3
-                tkc.create_oval(xS+jumpGateWidth, yS+jumpGateWidth, xE-jumpGateWidth, yE-jumpGateWidth, fill='black')
-                tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
+                self.tkc.create_oval(xS+jumpGateWidth, yS+jumpGateWidth, xE-jumpGateWidth, yE-jumpGateWidth, fill='black')
+                self.tkc.create_text(self.canSize[0]/2 + int(systemItem['x']) * fact, 
                                 self.canSize[1]/2 + int(systemItem['y']) * fact, 
                                 text=str(i), fill='white', font=('Arial Bold', 12))
 
@@ -452,29 +455,242 @@ class SpaceTrader:
 
     def drawSystem(self, systemInfo):
         systemDatas = systemInfo.json()['data']
-        tkc = self.can.TKCanvas
-        self.drawSun(tkc, systemDatas['type']) # display sun
-        self.displayPlanets(tkc, systemDatas['waypoints']) # display planets
+        self.tkc = self.can.TKCanvas
+        self.tkc.delete("all")
 
+        self.drawSun(systemDatas['type']) # display sun
+        self.displayPlanets(systemDatas['waypoints']) # display planets
+
+    def reloadMainScene(self):
+        windowTMP = self.initLayoutMainScene()
+        self.windowMainScene.close()
+        self.windowMainScene = windowTMP
+
+    def doRequest(self, orderTmp):
+        match orderTmp.requestType.value:
+            case "GET_STATUS":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "REGISTER_NEW_AGENT":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "GET_AGENT":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "LIST_AGENTS":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "GET_PUBLIC_AGENT":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "LIST_CONTRACTS":
+                print("doing:", orderTmp.requestType.value)
+                contractsInfo = requests.get(orderTmp.url, headers=orderTmp.headers)
+                if (contractsInfo.status_code == 200):
+                    print(json.dumps(contractsInfo.json(), indent=2))
+                    for i in range(len(contractsInfo.json()['data'])):
+                        self.contracts.append(Contract(contractsInfo.json()['data'][i]))
+                else :
+                    self.auto_mode = False
+                    print("auto-mode desactivated, contract impossible to find")
+                #print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "GET_CONTRACT":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "ACCEPT_CONTRACT":
+                print("doing:", orderTmp.requestType.value)
+                r = requests.post(orderTmp.url, headers=orderTmp.headers)
+                print(r, orderTmp.url, orderTmp.headers)
+                if (r.status_code == 200):
+                    print("contract accepted !!!")
+                    for i in range(len(self.contracts)):
+                        if self.contracts[i].id == r.json()['data']['contract']['id']:
+                            self.contracts[i] = Contract(r.json()['data']['contract'])
+                    self.agent = Agent(r.json()['data']['agent']) # update agent credits
+                elif (r.status_code == 404):
+                    print("notfound ???")
+                elif (r.json()['error']['code'] == 4501): # normaly useless, cause contracts is updated so it shouldn't ask to accept if already done
+                    print("contract already accepted !")
+                #print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "DELIVER_CARGO_TO_CONTRACT":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "FULFILL_CONTRACT":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "LIST_FACTIONS":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "GET_FACTION":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "LIST_SHIPS":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "PURCHASE_SHIP":
+                print("doing:", orderTmp.requestType.value)
+                dataBuyShip['shipType'] = "SHIP_MINING_DRONE"
+                dataBuyShip['waypointSymbol'] = self.shipYardWayPoint
+                purchasedShipInfo = requests.post(shipsURL, json=dataBuyShip, headers=self.headersAuthJsonAccept)
+
+                if (purchasedShipInfo.status_code == 201):
+                    print(purchasedShipInfo.json()['data'])
+                    print(purchasedShipInfo.json()['data']['ship']['registration']['role'])
+                    self.fleet.append(Ship(purchasedShipInfo.json()['data']['ship']))
+                    self.agent = Agent(purchasedShipInfo.json()['data']['agent'])
+                    #print(self.fleet[len(self.fleet) - 1].registration.role)
+                    self.have_mine_drone = True
+                    self.reloadMainScene()
+                #print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "GET_SHIP":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "GET_SHIP_CARGO":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "ORBIT_SHIP":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "SHIP_REFINE":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "CREATE_CHART":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "GET_SHIP_COOLDOWN":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "DOCK_SHIP":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "CREATE_SURVEY":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "EXTRACT_RESOURCES":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "JETTISON_CARGO":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "JUMP_SHIP":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "NAVIGATE_SHIP":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "PATCH_SHIP_NAV":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "GET_SHIP_NAV":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "WARP_SHIP":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "SELL_CARGO":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "SCAN_SYSTEMS":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "SCAN_WAYPOINTS":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "SCAN_SHIPS":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "REFUEL_SHIP":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "PURCHASE_CARGO":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "TRANSFER_CARGO":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "NEGOTIATE_CONTRACT":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "GET_MOUNTS":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "INSTALL_MOUNT":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "REMOVE_MOUNT":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "LIST_SYSTEMS":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "GET_SYSTEM":
+                print("doing:", orderTmp.requestType.value)
+                systemInfo = requests.get(orderTmp.url, headers=orderTmp.headers)
+                self.currentSystem = System(systemInfo.json()['data'])
+                self.drawSystem(systemInfo)
+                #print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "LIST_WAYPOINTS_IN_SYSTEM":
+                print("doing:", orderTmp.requestType.value)
+                wayPointsInfo = requests.get(orderTmp.url, headers=orderTmp.headers)
+
+                if (wayPointsInfo.status_code == 200): # TODO : factorise for loops
+                    for k in range(len(wayPointsInfo.json()['data'])):
+                        #print("k" + str(k))
+                        for j in range(len(wayPointsInfo.json()['data'][k]['traits'])):
+                            #print("j" + str(j) + " traits : " + wayPointsInfo.json()['data'][k]['traits'][j]['symbol'])
+                            if (wayPointsInfo.json()['data'][k]['traits'][j]['symbol'] == "SHIPYARD"):
+                                #print("shipyard finded way point : " + wayPointsInfo.json()['data'][k]['symbol'])
+                                self.shipYardWayPoint = wayPointsInfo.json()['data'][k]['symbol']
+                                return True # stop the 2 for loop at the first shipYardFound
+                    return False # no shipYard 
+                    # TODO : ptetre directement ajouter ici dans la liste d'ordre ce qu'il faut faire pour chopper le shipyard le plus proche
+                #print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "GET_WAYPOINT":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "GET_MARKET":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "GET_SHIPYARD":
+                shipYardInfo = requests.get(orderTmp.url, headers=orderTmp.headers)
+                if (shipYardInfo.status_code == 200):
+                    for i in range(len(shipYardInfo.json()['data']['shipTypes'])):
+                        #print(shipYardInfo.json()['data']['shipTypes'][i])
+                        if (shipYardInfo.json()['data']['shipTypes'][i]['type'] == 'SHIP_MINING_DRONE'):
+                            self.shipYardHaveMiningDrone = True
+                            break
+                #print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "GET_JUMP_GATE":
+                print("action not defined for this case:", orderTmp.requestType.value)
+
+            case _:
+                print("action not defined for this case: " + orderTmp.requestType.value)
 
     def displayMainScene(self):
 
         self.windowMainScene = self.initLayoutMainScene()
-        tkc = self.can.TKCanvas
         button_color_default = ('white','darkRed')
         button_color_selected = ('white','darkBlue')
         
         self.windowMainScene.un_hide()
         start_time = int(round(time.time() * 100))
+        self.tkc = self.can.TKCanvas
 
         self.current_time = 0
         
         self.setSleepTimer()
 
-        have_mine_drone = False
-        shipYardWayPoint = ""
-        shipYardHaveMiningDrone = False
         systemInfo = ""
+        for i in range(len(self.fleet)): #verify if we possess a mining drone
+            if (self.fleet[i].registration.role == "EXCAVATOR"):
+                self.have_mine_drone = True
+                break
 
         while True:
             event, values = self.windowMainScene.read(timeout=10)
@@ -498,94 +714,69 @@ class SpaceTrader:
                 self.windowMainScene['TIMER_SLEEP'].update('{:02d}:{:02d}:{:03d}'.format((display_sleep_timer // 100) // 60,
                                                                   (display_sleep_timer // 100) % 60,
                                                                   (display_sleep_timer % 100)*10))
-                continue # skip inputs if sleep timer is active (to respect the max(2) requests per seconde)
+                #continue # skip inputs if sleep timer is active (to respect the max(2) requests per seconde)
             elif (self.current_sleep_timer != self.sleep_time):
                 display_sleep_timer = 0
                 self.windowMainScene['TIMER_SLEEP'].update('{:02d}:{:02d}:{:03d}'.format((display_sleep_timer // 100) // 60,
                                                                   (display_sleep_timer // 100) % 60,
                                                                   (display_sleep_timer % 100)*10))
 
+            if len(self.orders) != 0:
+                if self.current_sleep_timer >= self.sleep_time:
+                    orderTmp = self.orders.popleft()
+                    #orderTmp = self.orders[random.randint(0, len(self.orders) - 1)]
+                    #print(len(self.orders))
+                    #print("requeste Type : ", orderTmp.requestType.value)
+
+                    self.doRequest(orderTmp)
+                    self.setSleepTimer()
+
+                    # TMP :
+                    for i in range(len(self.orders)):
+                        orderTmp = self.orders[i]
+                        print(i, "requeste Type :", orderTmp.requestType.value)
+                        #print(orderTmp)
+            
             #print(event, values)
 
             if self.auto_mode :
                 print("action auto !")
                 if (len(self.contracts) == 0):
                     print("recherche des infos concernant les contrats...")
-                    #print(self.contracts)
-                    contractsInfo = requests.get((contractURL), headers = self.headersJson)
-                    self.setSleepTimer()
-                    if (contractsInfo.status_code == 200):
-                        print(json.dumps(contractsInfo.json(), indent=2))
-                        for i in range(len(contractsInfo.json()['data'])):
-                            self.contracts.append(Contract(contractsInfo.json()['data'][i]))
-                    else :
-                        self.auto_mode = False
-                        print("auto-mode desactivated, contract impossible to find")
+                    self.orders.append(Order(False, RequestType('LIST_CONTRACTS'), contractURL, headers=self.headersJson))
                 elif (len(self.contracts) == 1):
                     contract = self.contracts[0]
                     print("1 contract disponible, accepted : " + str(contract.accepted))
 
                     if (not contract.accepted):
                         self.acceptContract(0)
+                    elif not self.have_mine_drone :
+                        print("no mining drone !")
+
+                        if (self.shipYardHaveMiningDrone): # buy the mining drone
+                            self.orders.append(Order(True, RequestType('PURCHASE_SHIP'), shipsURL, headers=self.headersAuthJsonAccept, json=dataBuyShip))  
+                        elif (self.shipYardWayPoint != ""): # si on a le way point d'un SHIPYARD on regarder si SHIP_MINING_DRONE dispo
+                            #print(shipYardWayPoint)
+                            self.orders.append(Order(True, RequestType('GET_SHIPYARD'), 
+                                                        self.getURLShipyardFromWayPoint(self.shipYardWayPoint), 
+                                                        headers=self.headersAuthAccept))
+                        else : # vérifier si SHIPYARD dans le system
+                            self.orders.append(Order(False, RequestType('LIST_WAYPOINTS_IN_SYSTEM'), self.getURLWayPointsfromShipSystem(), headers=self.headersAuthAccept))
+                                
                     else :
-                        print("TODO : faire ce qu'il faut pour faire le contract !!!")
-
-                        # TODO : trouver et acheter un drone de minage si pas déjà de drone de minage dans la flotte
-                        for i in range(len(self.fleet)):
-                            #print(self.fleet[i].registration.role)
-                            if (self.fleet[i].registration.role == "EXCAVATOR"):
-                                have_mine_drone = True
-                                break
+                        # pour l'instant on quitte le mode auto pour économiser la bande passante
                         
-                        if (not have_mine_drone):
-                            # pour acheter un drone de minage :
-                            print("no mining drone !")
-
-                            if (shipYardHaveMiningDrone): # buy the mining drone
-                                dataBuyShip['shipType'] = "SHIP_MINING_DRONE"
-                                dataBuyShip['waypointSymbol'] = shipYardWayPoint
-                                print("test")
-                                purchasedShipInfo = requests.post(shipsURL, json=dataBuyShip, headers=self.headersAuthJsonAccept)
-                                self.setSleepTimer()
-                                if (purchasedShipInfo.status_code == 201):
-                                    print(purchasedShipInfo.json()['data'])
-                                    print(purchasedShipInfo.json()['data']['ship']['registration']['role'])
-                                    self.fleet.append(Ship(purchasedShipInfo.json()['data']['ship']))
-                                    print(self.fleet[len(self.fleet) - 1].registration.role)
-                                    have_mine_drone = True
-                            elif (shipYardWayPoint != ""): # si on a le way point d'un SHIPYARD on regarder si SHIP_MINING_DRONE dispo
-                                #print(shipYardWayPoint)
-                                shipYardInfo = requests.get(self.getURLShipyardFromWayPoint(shipYardWayPoint), headers = self.headersAuthAccept)
-                                self.setSleepTimer()
-                                if (shipYardInfo.status_code == 200):
-                                    for i in range(len(shipYardInfo.json()['data']['shipTypes'])):
-                                        #print(shipYardInfo.json()['data']['shipTypes'][i])
-                                        if (shipYardInfo.json()['data']['shipTypes'][i]['type'] == 'SHIP_MINING_DRONE'):
-                                            shipYardHaveMiningDrone = True
-                                            break
-                            else : # vérifier SHIPYARD
-                                wayPointsInfo = requests.get((self.getURLWayPointsfromSystem()), headers = self.headersAuthAccept)
-                                self.setSleepTimer()
-                                if (wayPointsInfo.status_code == 200): # TODO : factorise for loops
-                                    for k in range(len(wayPointsInfo.json()['data'])):
-                                        #print("k" + str(k))
-                                        for j in range(len(wayPointsInfo.json()['data'][k]['traits'])):
-                                            #print("j" + str(j) + " traits : " + wayPointsInfo.json()['data'][k]['traits'][j]['symbol'])
-                                            if (wayPointsInfo.json()['data'][k]['traits'][j]['symbol'] == "SHIPYARD"):
-                                                #print("shipyard finded way point : " + wayPointsInfo.json()['data'][k]['symbol'])
-                                                shipYardWayPoint = wayPointsInfo.json()['data'][k]['symbol']
-                        else :
-                            print("we already have a mining drone !!!")
+                        self.windowMainScene['AUTO'].update("Auto")
+                        print("mode automatique désactivé !")
+                        self.auto_mode = not self.auto_mode
+                        
+                        print("we already have a mining drone !!!")
 
                         
                         # TODO : se déplacer au waypoint pour miner avec le drone de minage
                         # TODO : miner jusqu'à cargo plein
-                        # TODO : gérer déplacement au contract et revenir miner si contract pas fulfilled
+                        # TODO : gérer déplacement au contract (refuel aussi) et revenir miner si contract pas fulfilled
 
-
-
-
-                self.setSleepTimer()
                 continue
 
             if event == "MAP":
@@ -595,34 +786,22 @@ class SpaceTrader:
                 for i in range(len(self.fleet)):
                     self.windowMainScene["MIDDLE_SHIP" + str(i + 1)].update(button_color = button_color_default)
                     
-                tkc.delete("all")
                 if len(self.contracts) != 0:
                     if (systemInfo == ""):
-                        systemInfo = requests.get(self.getURLSystems(self.getSystemFromWayPoint(self.contracts[0].terms.deliver[0].destinationSymbol)), headers = self.headersAuthAccept)
-                        self.setSleepTimer()
-
-                    self.drawSystem(systemInfo)
-                    
-
-                # TODO : afficher les info sur la map
-                #tkc.delete("all")
-                #tkc.create_rectangle(100, 100, 600, 400, outline='white')
-                #tkc.create_line(50, 50, 650, 450, fill='green', width=5)
-                #tkc.create_oval(0,100,200,200, fill='red')
-                #tkc.create_oval(300,200,200,300, fill='blue')
-                #tkc.create_text(350, 250, text="Hello World", fill='white', font=('Arial Bold', 16))
-
+                        self.orders.append(Order(False, RequestType('GET_SYSTEM'), self.getURLSystems(self.getSystemFromWayPoint(self.contracts[0].terms.deliver[0].destinationSymbol)), headers=self.headersAuthAccept))
+                else :
+                    self.orders.append(Order(False, RequestType('GET_SYSTEM'), self.getURLSystems(self.getSystemFromWayPoint(self.agent.headquarters)), headers=self.headersAuthAccept))
             if event == "MIDDLE_FLEET":
                 # TODO : afficher les infos sur la fleet
                 self.windowMainScene['MIDDLE_FLEET'].update(button_color = button_color_selected)
                 self.windowMainScene['MAP'].update(button_color = button_color_default)
                 for i in range(len(self.fleet)):
                     self.windowMainScene["MIDDLE_SHIP" + str(i + 1)].update(button_color = button_color_default)
-                tkc.delete("all")
-                tkc.create_rectangle(100, 100, 600, 400, outline='white')
-                tkc.create_line(50, 50, 650, 450, fill='red', width=5)
-                tkc.create_oval(150,150,550,350, fill='blue')
-                tkc.create_text(350, 250, text="Hello World", fill='white', font=('Arial Bold', 16))
+                self.tkc.delete("all")
+                self.tkc.create_rectangle(100, 100, 600, 400, outline='white')
+                self.tkc.create_line(50, 50, 650, 450, fill='red', width=5)
+                self.tkc.create_oval(150,150,550,350, fill='blue')
+                self.tkc.create_text(350, 250, text="Hello World", fill='white', font=('Arial Bold', 16))
             
             for i in range(len(self.fleet)):
                 tmp_event_name = "MIDDLE_SHIP" + str(i + 1)
@@ -636,20 +815,11 @@ class SpaceTrader:
                     print("touch")
                     self.windowMainScene["MIDDLE_SHIP" + str(i + 1)].update(button_color = button_color_selected)
 
-                    tkc.delete("all")
-                    tkc.create_rectangle(100, 100, 600, 400, outline='white')
-                    tkc.create_line(50, 50, 650, 450, fill='red', width=5)
-                    tkc.create_oval(150,150,550,350, fill='blue')
-                    tkc.create_text(350, 250, text="ship" + str(i + 1), fill='white', font=('Arial Bold', 16))
-
-            # TODO : faire une fonction pour get les infos des ships (le nombre et les noms) et faire une fonction qui cré le layout en fonction des infos dispos
-
-            # TODO : on fleet modification (or ship modification) :
-                #windowTMP = self.initLayoutMainScene()
-                #self.windowMainScene.close()
-                #self.windowMainScene = windowTMP
-                #tkc=self.can.TKCanvas
-
+                    self.tkc.delete("all")
+                    self.tkc.create_rectangle(100, 100, 600, 400, outline='white')
+                    self.tkc.create_line(50, 50, 650, 450, fill='red', width=5)
+                    self.tkc.create_oval(150,150,550,350, fill='blue')
+                    self.tkc.create_text(350, 250, text=self.fleet[i].symbol, fill='white', font=('Arial Bold', 16))
 
 def main():
     spaceTrader = SpaceTrader()
