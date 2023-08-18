@@ -1,5 +1,6 @@
 import PySimpleGUI as sg
 import time
+import os
 import random
 from collections import deque
 from utilistiesSpaceTraders import *
@@ -7,7 +8,7 @@ from utilistiesSpaceTraders import *
 class SpaceTrader:
     orders = deque()
     agent = ""
-    fleet = [] # TODO : modifier pour enlever le "1" et ptetre initialiser mais normalement pas nécessaire car sera initialisé au moment ou on get la fleet
+    fleet = []
     token = ""
     faction = Faction.COSMIC
     contracts = []
@@ -15,14 +16,25 @@ class SpaceTrader:
     shipYardWayPoint = ""
     shipYardHaveMiningDrone = False
     have_mine_drone = False
+    currentSystem = ""
     
     auto_mode = False
 
     # timers :
-    current_time = int(round(time.time() * 100))
+    secToTimer = 100
+    current_time = int(round(time.time() * secToTimer))
     sleep_time = 50 # 50 = 0.5 sec
+    nav_time = 1
+    laser_time = 1
+
     current_sleep_timer = 0
+    current_nav_timer = 0
+    current_laser_timer = 0
+
     sleep_start_time = 0
+    nav_start_time = 0
+    laser_start_time = 0
+
 
     contractindex = 0
     contractDeliverMaterialIndex = 0
@@ -135,6 +147,7 @@ class SpaceTrader:
         return sg.Window('SpaceTradersGUI with pySimpleGUI', layoutMainScene, size=(960, 750), finalize=True)
 
     def setShipsURL(self, realShipname):
+        self.currentShipSymbol = realShipname
         self.shipsURL = "/my/ships"
         self.shipName = "/" + realShipname
         self.myShipsURL = https + self.shipsURL + self.shipName
@@ -146,6 +159,8 @@ class SpaceTrader:
         self.purchaseURL = self.myShipsURL + "/purchase" 
         self.refuelURL = self.myShipsURL + "/refuel"
         self.navigateURL = self.myShipsURL + "/navigate"
+        self.getNavShipURL = self.myShipsURL + "/nav"
+        self.cooldownURL = self.myShipsURL + "/cooldown"
 
     def setHeadersWithToken(self, token):
         self.token = token
@@ -163,14 +178,33 @@ class SpaceTrader:
             "Authorization": self.headersAuth['Authorization'],
             "Accept": "application/json"
         }
+    
+    def setSleepTimer(self):
+        self.current_sleep_timer = 0 # TEST
+        self.sleep_start_time = self.current_time
 
     def decreaseSleepTimer(self):
         self.current_sleep_timer = (self.current_time - self.sleep_start_time)
         return self.sleep_time - self.current_sleep_timer
     
-    def setSleepTimer(self):
-        self.current_sleep_timer = 0 # TEST
-        self.sleep_start_time = self.current_time
+    def setNavTimer(self, navTime):
+        self.nav_time = navTime
+        self.current_nav_timer = 0 # TEST
+        self.nav_start_time = self.current_time
+    
+    def decreaseNavTimer(self):
+        self.current_nav_timer = (self.current_time - self.nav_start_time)
+        return self.nav_time - self.current_nav_timer
+    
+    def setLaserTimer(self, laserTime = 7000):
+        #print("laserTime", laserTime)
+        self.laser_time = laserTime
+        self.current_laser_timer = 0 # TEST
+        self.laser_start_time = self.current_time
+    
+    def decreaseLaserTimer(self):
+        self.current_laser_timer = (self.current_time - self.laser_start_time)
+        return self.laser_time - self.current_laser_timer
 
     def acceptContract(self, contractIndex = 0):
         self.orders.append(Order(True, RequestType('ACCEPT_CONTRACT'), self.getURLContractVerb(self.contracts[contractIndex].id), headers=self.headersAuthJsonAccept))
@@ -282,6 +316,10 @@ class SpaceTrader:
                             self.agent = Agent(agentInfo.json()['data']['agent'])
 
                             try:
+                                if os.path.getsize("datas.json") == 0:
+                                    print("datas.json vide !")
+                                    raise JsonEmptyError("os.path.getsize(\"datas.json\") == 0")
+                                    
                                 with open("datas.json", 'r') as f:
                                     data = json.load(f)
                                     found = False
@@ -303,8 +341,8 @@ class SpaceTrader:
                                             json.dump(data, outfile, indent = 4)
                                         self.windowMainMenu['TOKEN'].update(self.token)
                                         self.windowMainMenu['INFO'].update("token saved and filled, ready to connect")
-                            except FileNotFoundError:
-                                print("file not found")
+                            except (JsonEmptyError, FileNotFoundError) as e:
+                                print(e)
                                 with open('datas.json', 'w') as outfile:
                                     dataJsonExample['data'][0]['username'] = self.agent.symbol
                                     dataJsonExample['data'][0]['token'] = self.token
@@ -318,6 +356,7 @@ class SpaceTrader:
 
                             except Exception as e:
                                 print ("??? data structure ??? : " + e.__str__)
+                                raise Exception
 
                             self.windowMainMenu['TOKEN'].update(self.token)
                             self.windowMainMenu['INFO'].update("token filled, ready to connect")
@@ -466,7 +505,33 @@ class SpaceTrader:
         self.windowMainScene.close()
         self.windowMainScene = windowTMP
 
+    def updateDataNavigateShip(self, waypoint):
+        self.dataNavigateShip = {
+            "waypointSymbol": waypoint
+        }
+
+    def updateAgentAndDisplay(self, agentInfos):
+        self.agent = Agent(agentInfos)
+        self.windowMainScene['GOLD'].update(self.agent.credits)
+
+    def deliverCargoToContract(self, currentShip, contract):
+        dataDeliverCargo['shipSymbol'] = currentShip.symbol
+        dataDeliverCargo['tradeSymbol'] = currentShip.cargo.inventory[0].symbol
+        dataDeliverCargo['units'] = currentShip.cargo.inventory[0].units
+
+        self.orders.append(Order(True, RequestType("DELIVER_CARGO_TO_CONTRACT"), 
+                                shipSymbol=currentShip.symbol, 
+                                url=contract.deliverURL, 
+                                headers=self.headersAuthJsonAccept,
+                                json=dataDeliverCargo))
+
     def doRequest(self, orderTmp):
+        if orderTmp.requestType.value != "WAIT":
+            print("Doing the following request :", orderTmp.requestType.value)
+
+        infos = orderTmp.doRequest()
+        #print(json.dumps(infos.json(),indent=2))
+
         match orderTmp.requestType.value:
             case "GET_STATUS":
                 print("action not defined for this case:", orderTmp.requestType.value)
@@ -484,38 +549,47 @@ class SpaceTrader:
                 print("action not defined for this case:", orderTmp.requestType.value)
 
             case "LIST_CONTRACTS":
-                print("doing:", orderTmp.requestType.value)
-                contractsInfo = requests.get(orderTmp.url, headers=orderTmp.headers)
-                if (contractsInfo.status_code == 200):
-                    print(json.dumps(contractsInfo.json(), indent=2))
-                    for i in range(len(contractsInfo.json()['data'])):
-                        self.contracts.append(Contract(contractsInfo.json()['data'][i]))
+                if (infos.status_code == 200):
+                    #print(json.dumps(infos.json(), indent=2))
+                    for i in range(len(infos.json()['data'])):
+                        self.contracts.append(Contract(infos.json()['data'][i]))
                 else :
                     self.auto_mode = False
                     print("auto-mode desactivated, contract impossible to find")
+                    print(json.dumps(infos.json(), indent=2))
                 #print("action not defined for this case:", orderTmp.requestType.value)
 
             case "GET_CONTRACT":
                 print("action not defined for this case:", orderTmp.requestType.value)
 
             case "ACCEPT_CONTRACT":
-                print("doing:", orderTmp.requestType.value)
-                r = requests.post(orderTmp.url, headers=orderTmp.headers)
-                print(r, orderTmp.url, orderTmp.headers)
-                if (r.status_code == 200):
+                if (infos.status_code == 200):
                     print("contract accepted !!!")
                     for i in range(len(self.contracts)):
-                        if self.contracts[i].id == r.json()['data']['contract']['id']:
-                            self.contracts[i] = Contract(r.json()['data']['contract'])
-                    self.agent = Agent(r.json()['data']['agent']) # update agent credits
-                elif (r.status_code == 404):
+                        if self.contracts[i].id == infos.json()['data']['contract']['id']:
+                            self.contracts[i] = Contract(infos.json()['data']['contract'])
+                    self.updateAgentAndDisplay(infos.json()['data']['agent'])
+                    
+                elif (infos.status_code == 404):
                     print("notfound ???")
-                elif (r.json()['error']['code'] == 4501): # normaly useless, cause contracts is updated so it shouldn't ask to accept if already done
+                elif (infos.json()['error']['code'] == 4501): # normaly useless, cause contracts is updated so it shouldn't ask to accept if already done
                     print("contract already accepted !")
                 #print("action not defined for this case:", orderTmp.requestType.value)
 
             case "DELIVER_CARGO_TO_CONTRACT":
-                print("action not defined for this case:", orderTmp.requestType.value)
+                if (infos.status_code == 200):
+                    # TODO : faire une méthode pour get le contrat en rapport, (son id par exemple qui est utilisé dans l'url)
+                    self.contracts[0] = infos.json()['data']['contract']
+                    # TODO : utiliser le shipSymbol dans les datas de la requete pour trouver le bon ship
+                    self.fleet[self.miningDroneIndex].cargo = Cargo(infos.json()['data']['cargo'])
+                    print("delivery to contract made, need ", 
+                          self.contracts[0].terms.deliver[0].unitsRequired,
+                          "of",
+                          self.contracts[0].terms.deliver[0].tradeSymbol,
+                          "to fulfilled contract.")
+                else :
+                    print(json.dumps(infos.json(), indent=2))
+                #print("action not defined for this case:", orderTmp.requestType.value)
 
             case "FULFILL_CONTRACT":
                 print("action not defined for this case:", orderTmp.requestType.value)
@@ -530,16 +604,11 @@ class SpaceTrader:
                 print("action not defined for this case:", orderTmp.requestType.value)
 
             case "PURCHASE_SHIP":
-                print("doing:", orderTmp.requestType.value)
-                dataBuyShip['shipType'] = "SHIP_MINING_DRONE"
-                dataBuyShip['waypointSymbol'] = self.shipYardWayPoint
-                purchasedShipInfo = requests.post(shipsURL, json=dataBuyShip, headers=self.headersAuthJsonAccept)
-
-                if (purchasedShipInfo.status_code == 201):
-                    print(purchasedShipInfo.json()['data'])
-                    print(purchasedShipInfo.json()['data']['ship']['registration']['role'])
-                    self.fleet.append(Ship(purchasedShipInfo.json()['data']['ship']))
-                    self.agent = Agent(purchasedShipInfo.json()['data']['agent'])
+                if (infos.status_code == 201):
+                    print(infos.json()['data'])
+                    print(infos.json()['data']['ship']['registration']['role'])
+                    self.fleet.append(Ship(infos.json()['data']['ship']))
+                    self.updateAgentAndDisplay(infos.json()['data']['agent'])
                     #print(self.fleet[len(self.fleet) - 1].registration.role)
                     self.have_mine_drone = True
                     self.reloadMainScene()
@@ -552,7 +621,18 @@ class SpaceTrader:
                 print("action not defined for this case:", orderTmp.requestType.value)
 
             case "ORBIT_SHIP":
-                print("action not defined for this case:", orderTmp.requestType.value)
+                if (infos.status_code == 200):
+                    self.fleet[self.miningDroneIndex].nav = Nav(infos.json()['data']['nav'])
+                    print(self.fleet[self.miningDroneIndex].symbol, self.fleet[self.miningDroneIndex].nav.status)
+                else :
+                    if infos.json()['error']['code'] == 4214 :
+                        self.setNavTimer(infos.json()['error']['data']['secondsToArrival']*self.secToTimer)
+                        print("nav timer updated :", infos.json()['error']['data']['secondsToArrival'], "s. to arrial\n","\torders cleared")
+                        self.orders.clear()
+                    else :
+                        print (json.dumps(infos.json(), indent=2))
+
+                #print("action not defined for this case:", orderTmp.requestType.value)
 
             case "SHIP_REFINE":
                 print("action not defined for this case:", orderTmp.requestType.value)
@@ -561,16 +641,69 @@ class SpaceTrader:
                 print("action not defined for this case:", orderTmp.requestType.value)
 
             case "GET_SHIP_COOLDOWN":
-                print("action not defined for this case:", orderTmp.requestType.value)
+                unknown = -1
+                if infos.status_code == 204: # no cooldown
+                    #TODO : set all ship cooldown to 0
+                    print("no cooldown, TODO : set all ship cd to 0")
+                elif infos.status_code == 200:
+                    #print(json.dumps(infos.json(), indent=2))
+                    print("cd remaining seconds :", infos.json()['data']['remainingSeconds'])
+
+                    if int(infos.json()['data']['totalSeconds']) == 70:
+                        print("TODO update ship extraction cd")
+                        self.setLaserTimer(infos.json()['data']['remainingSeconds'] * self.secToTimer)
+
+                    elif int(infos.json()['data']['totalSeconds']) == unknown:
+                        print("TODO update ship unknown cd")
+
+                    else:
+                        print("TODO update ship navigation cd")
+                        self.setNavTimer(int(infos.json()['data']['remainingSeconds']) * self.secToTimer)
+
+                    #print(json.dumps(infos.json(), indent=2))
+                else :
+                    print(json.dumps(infos.json(), indent=2))
+
+                #print("action not defined for this case:", orderTmp.requestType.value)
 
             case "DOCK_SHIP":
-                print("action not defined for this case:", orderTmp.requestType.value)
+                if (infos.status_code == 200):
+                    self.fleet[self.miningDroneIndex].nav = Nav(infos.json()['data']['nav'])
+                    print(self.fleet[self.miningDroneIndex].symbol, self.fleet[self.miningDroneIndex].nav.status)
+                else :
+                    if infos.json()['error']['code'] == 4214 :
+                        self.setNavTimer(infos.json()['error']['data']['secondsToArrival']*self.secToTimer)
+                        print("nav timer updated :", infos.json()['error']['data']['secondsToArrival'], "s. to arrial\n","\torders cleared")
+                        self.orders.clear()
+                    else :
+                        print (json.dumps(infos.json(), indent=2))
+                #print("action not defined for this case:", orderTmp.requestType.value)
 
             case "CREATE_SURVEY":
                 print("action not defined for this case:", orderTmp.requestType.value)
 
             case "EXTRACT_RESOURCES":
-                print("action not defined for this case:", orderTmp.requestType.value)
+                if (infos.status_code == 201):
+                    # TODO : CD in ships
+                    self.fleet[self.miningDroneIndex].updateCDExtract(infos.json()['data']['cooldown']['remainingSeconds'])
+                    self.setLaserTimer(infos.json()['data']['cooldown']['remainingSeconds'] * self.secToTimer)
+
+                    self.fleet[self.miningDroneIndex].cargo = Cargo(infos.json()['data']['cargo'])
+                    extartionInfo = infos.json()['data']['extraction']['yield']
+                    print(self.fleet[self.miningDroneIndex].symbol, "extract", extartionInfo['units'], extartionInfo['symbol'])
+
+                elif (infos.status_code == 400):
+                    print (json.dumps(infos.json(), indent=2))
+
+                elif infos.json()['error']['code'] == 4000:
+                    self.fleet[self.miningDroneIndex].updateCDExtract(infos.json()['error']['data']['cooldown']['remainingSeconds'])
+                    self.setLaserTimer(infos.json()['error']['data']['cooldown']['remainingSeconds'] * self.secToTimer)
+                    print(self.fleet[self.miningDroneIndex].symbol, "wait to extract")
+
+                else :
+                    print (json.dumps(infos.json(), indent=2))
+
+                #print("action not defined for this case:", orderTmp.requestType.value)
 
             case "JETTISON_CARGO":
                 print("action not defined for this case:", orderTmp.requestType.value)
@@ -579,19 +712,50 @@ class SpaceTrader:
                 print("action not defined for this case:", orderTmp.requestType.value)
 
             case "NAVIGATE_SHIP":
-                print("action not defined for this case:", orderTmp.requestType.value)
+                if infos.status_code == 200:
+                    currentShip = self.fleet[self.miningDroneIndex]
+                    # TODO : modifier l'index, ptetre faire une fonction qui get le symbol du ship (depuis l'url) 
+                    # puis boucler sur fleet pour trouver lequel modifier
+                    currentShip.fuel = Fuel(infos.json()['data']['fuel'])
+                    currentShip.nav = Nav(infos.json()['data']['nav'])
+                    self.setNavTimer(currentShip.getDiffFromRouteTime()*self.secToTimer)
+                else :
+                    print(json.dumps(infos.json()))
+
+                #print("action not defined for this case:", orderTmp.requestType.value)
 
             case "PATCH_SHIP_NAV":
                 print("action not defined for this case:", orderTmp.requestType.value)
 
             case "GET_SHIP_NAV":
-                print("action not defined for this case:", orderTmp.requestType.value)
+                if infos.status_code == 200:
+                    currentShip = self.fleet[self.miningDroneIndex]
+                    # TODO : modifier l'index, ptetre faire une fonction qui get le symbol du ship (depuis l'url) 
+                    # puis boucler sur fleet pour trouver lequel modifier
+                    currentShip.nav = Nav(infos.json()['data'])
+                    if self.current_nav_timer >= self.nav_time:
+                        diff = currentShip.nav.route.getDiffFromRouteTimeArrival()
+                        print("diff :", diff)
+                        if diff > 0:
+                            self.setNavTimer(diff * self.secToTimer)
+                        else :
+                            self.setNavTimer(2)
+                else :
+                    print(json.dumps(infos.json()))
+
+                #print("action not defined for this case:", orderTmp.requestType.value)
 
             case "WARP_SHIP":
                 print("action not defined for this case:", orderTmp.requestType.value)
 
             case "SELL_CARGO":
-                print("action not defined for this case:", orderTmp.requestType.value)
+                if infos.status_code == 201:
+                    self.updateAgentAndDisplay(infos.json()['data']['agent'])
+                    self.fleet[self.miningDroneIndex].cargo = Cargo(infos.json()['data']['cargo'])
+                    print(json.dumps(infos.json()['data']['transaction'], indent=2))
+                else :
+                    print(json.dumps(infos.json(), indent=2))
+                #print("action not defined for this case:", orderTmp.requestType.value)
 
             case "SCAN_SYSTEMS":
                 print("action not defined for this case:", orderTmp.requestType.value)
@@ -603,7 +767,13 @@ class SpaceTrader:
                 print("action not defined for this case:", orderTmp.requestType.value)
 
             case "REFUEL_SHIP":
-                print("action not defined for this case:", orderTmp.requestType.value)
+                if (infos.status_code == 200):
+                    self.fleet[self.miningDroneIndex].fuel = Fuel(infos.json()['data']['fuel'])
+                    self.updateAgentAndDisplay(infos.json()['data']['agent'])
+                    print(json.dumps(infos.json()['data']['transaction'], indent=2))
+                else :
+                    print (json.dumps(infos.json(), indent=2))
+                #print("action not defined for this case:", orderTmp.requestType.value)
 
             case "PURCHASE_CARGO":
                 print("action not defined for this case:", orderTmp.requestType.value)
@@ -627,24 +797,20 @@ class SpaceTrader:
                 print("action not defined for this case:", orderTmp.requestType.value)
 
             case "GET_SYSTEM":
-                print("doing:", orderTmp.requestType.value)
-                systemInfo = requests.get(orderTmp.url, headers=orderTmp.headers)
-                self.currentSystem = System(systemInfo.json()['data'])
-                self.drawSystem(systemInfo)
+                if (infos.status_code == 200):
+                    self.currentSystem = System(infos.json()['data'])
+                    self.drawSystem(infos)
                 #print("action not defined for this case:", orderTmp.requestType.value)
 
             case "LIST_WAYPOINTS_IN_SYSTEM":
-                print("doing:", orderTmp.requestType.value)
-                wayPointsInfo = requests.get(orderTmp.url, headers=orderTmp.headers)
-
-                if (wayPointsInfo.status_code == 200): # TODO : factorise for loops
-                    for k in range(len(wayPointsInfo.json()['data'])):
+                if (infos.status_code == 200): # TODO : factorise for loops
+                    for k in range(len(infos.json()['data'])):
                         #print("k" + str(k))
-                        for j in range(len(wayPointsInfo.json()['data'][k]['traits'])):
+                        for j in range(len(infos.json()['data'][k]['traits'])):
                             #print("j" + str(j) + " traits : " + wayPointsInfo.json()['data'][k]['traits'][j]['symbol'])
-                            if (wayPointsInfo.json()['data'][k]['traits'][j]['symbol'] == "SHIPYARD"):
+                            if (infos.json()['data'][k]['traits'][j]['symbol'] == "SHIPYARD"):
                                 #print("shipyard finded way point : " + wayPointsInfo.json()['data'][k]['symbol'])
-                                self.shipYardWayPoint = wayPointsInfo.json()['data'][k]['symbol']
+                                self.shipYardWayPoint = infos.json()['data'][k]['symbol']
                                 return True # stop the 2 for loop at the first shipYardFound
                     return False # no shipYard 
                     # TODO : ptetre directement ajouter ici dans la liste d'ordre ce qu'il faut faire pour chopper le shipyard le plus proche
@@ -657,17 +823,20 @@ class SpaceTrader:
                 print("action not defined for this case:", orderTmp.requestType.value)
 
             case "GET_SHIPYARD":
-                shipYardInfo = requests.get(orderTmp.url, headers=orderTmp.headers)
-                if (shipYardInfo.status_code == 200):
-                    for i in range(len(shipYardInfo.json()['data']['shipTypes'])):
+                print(orderTmp.url)
+                if (infos.status_code == 200):
+                    for i in range(len(infos.json()['data']['shipTypes'])):
                         #print(shipYardInfo.json()['data']['shipTypes'][i])
-                        if (shipYardInfo.json()['data']['shipTypes'][i]['type'] == 'SHIP_MINING_DRONE'):
+                        if (infos.json()['data']['shipTypes'][i]['type'] == 'SHIP_MINING_DRONE'):
                             self.shipYardHaveMiningDrone = True
                             break
                 #print("action not defined for this case:", orderTmp.requestType.value)
 
             case "GET_JUMP_GATE":
                 print("action not defined for this case:", orderTmp.requestType.value)
+
+            case "WAIT":
+                tmp = 0
 
             case _:
                 print("action not defined for this case: " + orderTmp.requestType.value)
@@ -679,17 +848,20 @@ class SpaceTrader:
         button_color_selected = ('white','darkBlue')
         
         self.windowMainScene.un_hide()
-        start_time = int(round(time.time() * 100))
+        start_time = int(round(time.time() * self.secToTimer))
         self.tkc = self.can.TKCanvas
 
         self.current_time = 0
         
         self.setSleepTimer()
+        self.setLaserTimer(1)
+        self.setNavTimer(1)
 
         systemInfo = ""
         for i in range(len(self.fleet)): #verify if we possess a mining drone
             if (self.fleet[i].registration.role == "EXCAVATOR"):
                 self.have_mine_drone = True
+                self.miningDroneIndex = i
                 break
 
         while True:
@@ -709,80 +881,286 @@ class SpaceTrader:
                     print("mode automatique désactivé !")
                 self.auto_mode = not self.auto_mode
 
+            #region TIMERS
+            # request timer
             if self.current_sleep_timer < self.sleep_time:
                 display_sleep_timer = self.decreaseSleepTimer()
                 self.windowMainScene['TIMER_SLEEP'].update('{:02d}:{:02d}:{:03d}'.format((display_sleep_timer // 100) // 60,
                                                                   (display_sleep_timer // 100) % 60,
                                                                   (display_sleep_timer % 100)*10))
-                #continue # skip inputs if sleep timer is active (to respect the max(2) requests per seconde)
             elif (self.current_sleep_timer != self.sleep_time):
                 display_sleep_timer = 0
                 self.windowMainScene['TIMER_SLEEP'].update('{:02d}:{:02d}:{:03d}'.format((display_sleep_timer // 100) // 60,
                                                                   (display_sleep_timer // 100) % 60,
                                                                   (display_sleep_timer % 100)*10))
+            
+            # nav timer
+            if self.current_nav_timer < self.nav_time:
+                display_nav_timer = self.decreaseNavTimer()
+                self.windowMainScene['TIMER_NAVIGATION'].update('{:02d}:{:02d}:{:03d}'.format((display_nav_timer // 100) // 60,
+                                                                  (display_nav_timer // 100) % 60,
+                                                                  (display_nav_timer % 100)*10))
+            elif (self.current_nav_timer != self.nav_time):
+                display_nav_timer = 0
+                self.windowMainScene['TIMER_NAVIGATION'].update('{:02d}:{:02d}:{:03d}'.format((display_nav_timer // 100) // 60,
+                                                                  (display_nav_timer // 100) % 60,
+                                                                  (display_nav_timer % 100)*10))
 
+            # laser timer
+            if self.current_laser_timer < self.laser_time:
+                display_laser_timer = self.decreaseLaserTimer()
+                self.windowMainScene['TIMER_RELOAD'].update('{:02d}:{:02d}:{:03d}'.format((display_laser_timer // 100) // 60,
+                                                                  (display_laser_timer // 100) % 60,
+                                                                  (display_laser_timer % 100)*10))
+            elif (self.current_nav_timer != self.nav_time):
+                display_laser_timer = 0
+                self.windowMainScene['TIMER_RELOAD'].update('{:02d}:{:02d}:{:03d}'.format((display_laser_timer // 100) // 60,
+                                                                  (display_laser_timer // 100) % 60,
+                                                                  (display_laser_timer % 100)*10))
+            #endregion
+
+            # REQUESTS EXECUTION :
             if len(self.orders) != 0:
                 if self.current_sleep_timer >= self.sleep_time:
                     orderTmp = self.orders.popleft()
                     #orderTmp = self.orders[random.randint(0, len(self.orders) - 1)]
                     #print(len(self.orders))
-                    #print("requeste Type : ", orderTmp.requestType.value)
+                    #print("request Type : ", orderTmp.requestType.value)
 
                     self.doRequest(orderTmp)
                     self.setSleepTimer()
 
                     # TMP :
-                    for i in range(len(self.orders)):
-                        orderTmp = self.orders[i]
-                        print(i, "requeste Type :", orderTmp.requestType.value)
+                    #for i in range(len(self.orders)):
+                        #orderTmp = self.orders[i]
+                        #print(i, "request Type :", orderTmp.requestType.value)
                         #print(orderTmp)
             
             #print(event, values)
 
             if self.auto_mode :
-                print("action auto !")
+                #print("action auto !")
                 if (len(self.contracts) == 0):
                     print("recherche des infos concernant les contrats...")
                     if len(self.orders) == 0:
-                        self.orders.append(Order(False, RequestType('LIST_CONTRACTS'), contractURL, headers=self.headersJson))
-                elif (len(self.contracts) == 1):
+                        self.orders.append(Order(False, RequestType('LIST_CONTRACTS'), url=contractURL, headers=self.headersJson))
+                elif (len(self.contracts) >= 1):
                     contract = self.contracts[0]
-                    print("1 contract disponible, accepted : " + str(contract.accepted))
 
                     if (not contract.accepted):
                         if len(self.orders) == 0:
+                            print("1 contract available, accepted : " + str(contract.accepted))
                             self.acceptContract(0)
                     elif not self.have_mine_drone :
                         print("no mining drone !")
 
                         if (self.shipYardHaveMiningDrone): # buy the mining drone
                             if len(self.orders) == 0:
-                                self.orders.append(Order(True, RequestType('PURCHASE_SHIP'), shipsURL, headers=self.headersAuthJsonAccept, json=dataBuyShip))  
+                                dataBuyShip['shipType'] = "SHIP_MINING_DRONE"
+                                dataBuyShip['waypointSymbol'] = self.shipYardWayPoint
+                                self.orders.append(Order(True, RequestType('PURCHASE_SHIP'), url=shipsURL, headers=self.headersAuthJsonAccept, json=dataBuyShip))  
                         elif (self.shipYardWayPoint != ""): # si on a le way point d'un SHIPYARD on regarder si SHIP_MINING_DRONE dispo
                             #print(shipYardWayPoint)
                             if len(self.orders) == 0:
-                                self.orders.append(Order(True, RequestType('GET_SHIPYARD'), 
-                                                        self.getURLShipyardFromWayPoint(self.shipYardWayPoint), 
+                                self.orders.append(Order(False, RequestType('GET_SHIPYARD'), 
+                                                        url=self.getURLShipyardFromWayPoint(self.shipYardWayPoint), 
                                                         headers=self.headersAuthAccept))
                         else : # vérifier si SHIPYARD dans le system
                             if len(self.orders) == 0:  
-                                self.orders.append(Order(False, RequestType('LIST_WAYPOINTS_IN_SYSTEM'), self.getURLWayPointsfromShipSystem(), headers=self.headersAuthAccept))
-                                
+                                self.orders.append(Order(False, RequestType('LIST_WAYPOINTS_IN_SYSTEM'), url=self.getURLWayPointsfromShipSystem(), headers=self.headersAuthAccept))
                     else :
-                        # pour l'instant on quitte le mode auto pour économiser la bande passante
-                        
-                        self.windowMainScene['AUTO'].update("Auto")
+                        #left auto mode :
+                        """ self.windowMainScene['AUTO'].update("Auto")
                         print("mode automatique désactivé !")
                         self.auto_mode = not self.auto_mode
                         
-                        print("we already have a mining drone !!!")
+                        print("we already have a mining drone !!!") """
 
+                        if (self.currentSystem != ""):
+                            for waypoint in self.currentSystem.wayPoints:
+                                if waypoint.type == "ASTEROID_FIELD":
+                                    self.asteroidFieldWaypoint = waypoint.symbol
+                                    self.updateDataNavigateShip(waypoint.symbol)
                         
-                        # TODO : se déplacer au waypoint pour miner avec le drone de minage
-                        # TODO : miner jusqu'à cargo plein
-                        # TODO : gérer déplacement au contract (refuel aussi) et revenir miner si contract pas fulfilled
+                        if len(self.fleet) != 0 and len(self.orders) == 0:
+                            currentShip = self.fleet[self.miningDroneIndex]
+                            self.setShipsURL(currentShip.symbol)
+                            # we are not in asteroid field so we need to navigate to # TODO  replace with == contract waypoint
+                            if currentShip.nav.waypointSymbol != self.asteroidFieldWaypoint:
+                                print("ship status :", currentShip.nav.status, "- timers :", self.current_nav_timer, self.nav_time)
+                                if self.current_nav_timer < self.nav_time : # navigation processing
+                                    print("navigation processing")
+                                    self.orders.append(Order(True, RequestType("WAIT")))
+                                    
+                                elif currentShip.cargo.capacity - currentShip.cargo.units <= 0 and currentShip.nav.waypointSymbol == contract.getWayPointForDeliverThis(currentShip.cargo.inventory[0].symbol): 
+                                    # dock
+                                    self.orders.append(Order(True, RequestType("DOCK_SHIP"), 
+                                                            shipSymbol=currentShip.symbol, 
+                                                            url=currentShip.dockURL, 
+                                                            headers=self.headersAuthJsonAccept))
+                                    
+                                    # Deliver Cargo to Contract
+                                    self.deliverCargoToContract(currentShip, contract)
+                                    
+                                    # refuel if necessary
+                                    if currentShip.fuel.current * 2 <= currentShip.fuel.capacity:
+                                        self.orders.append(Order(True, RequestType("REFUEL_SHIP"), 
+                                                                shipSymbol=currentShip.symbol, 
+                                                                url=currentShip.refuelURL, 
+                                                                headers=self.headersAuthJsonAccept))
+                                    
+                                    # orbit 
+                                    self.orders.append(Order(True, RequestType("ORBIT_SHIP"), 
+                                                            shipSymbol=currentShip.symbol,
+                                                            url=currentShip.orbitURL, 
+                                                            headers=self.headersAuthJsonAccept))
+                                    
+                                    # nav to asteroid if contract not fulfilled 
+                                    self.updateDataNavigateShip(self.asteroidFieldWaypoint)
+                                    self.orders.append(Order(True, RequestType("NAVIGATE_SHIP"), 
+                                                            shipSymbol=currentShip.symbol,
+                                                            url=currentShip.navigateURL,
+                                                            headers=self.headersAuthJsonAccept, 
+                                                            json=self.dataNavigateShip))
+                                    
+                                    # set the timer for the navigation
+                                    self.orders.append(Order(False, RequestType("GET_SHIP_NAV"), 
+                                                                shipSymbol=currentShip.symbol, 
+                                                                url=currentShip.getNavShipURL, 
+                                                                headers=self.headersAuthAccept))
 
-                continue
+                                elif (self.current_nav_timer >= self.nav_time): #TODO : modifier ! cela n'a aucun sens
+                                    # if we are docked
+                                    if (currentShip.nav.status == "DOCKED"):
+                                        # orbit Ship
+                                        self.orders.append(Order(True, RequestType("ORBIT_SHIP"), 
+                                                                shipSymbol=currentShip.symbol,
+                                                                url=self.orbitURL, 
+                                                                headers=self.headersAuthJsonAccept))
+                                        # navigate to asteroid field
+                                        self.orders.append(Order(True, RequestType("NAVIGATE_SHIP"), 
+                                                                shipSymbol=currentShip.symbol,
+                                                                url=self.navigateURL,
+                                                                headers=self.headersAuthJsonAccept, 
+                                                                json=self.dataNavigateShip))
+                                        # get the information to set timers
+                                        self.orders.append(Order(False, RequestType("GET_SHIP_NAV"), 
+                                                                shipSymbol=currentShip.symbol, 
+                                                                url=currentShip.getNavShipURL, 
+                                                                headers=self.headersAuthAccept))
+                                    elif (currentShip.nav.status == "IN_TRANSIT"):
+                                        self.orders.append(Order(False, RequestType("GET_SHIP_NAV"), 
+                                                                shipSymbol=currentShip.symbol, 
+                                                                url=currentShip.getNavShipURL, 
+                                                                headers=self.headersAuthAccept))
+                                    elif currentShip.nav.status == "IN_ORBIT":
+                                        self.orders.append(Order(True, RequestType("NAVIGATE_SHIP"), 
+                                                                shipSymbol=currentShip.symbol,
+                                                                url=self.navigateURL,
+                                                                headers=self.headersAuthJsonAccept, 
+                                                                json=self.dataNavigateShip))
+                                        
+                                        self.orders.append(Order(False, RequestType("GET_SHIP_NAV"), 
+                                                                shipSymbol=currentShip.symbol, 
+                                                                url=currentShip.getNavShipURL, 
+                                                                headers=self.headersAuthAccept))
+
+                                else :
+                                    print("bug ?")
+                                    self.orders.append(Order(True, RequestType("WAIT")))
+
+                            elif currentShip.nav.waypointSymbol == self.asteroidFieldWaypoint:
+                                if self.nav_time == 1 :# no info
+                                    print("getting nav info", currentShip.nav.waypointSymbol, ", timers :", self.current_nav_timer, self.nav_time)
+                                    self.orders.append(Order(False, RequestType("GET_SHIP_NAV"), 
+                                                                    shipSymbol=currentShip.symbol, 
+                                                                    url=currentShip.getNavShipURL, 
+                                                                    headers=self.headersAuthAccept))
+                                elif self.current_nav_timer < self.nav_time : # navigation processing
+                                    print("navigate to", currentShip.nav.waypointSymbol, "- timers :", self.current_nav_timer, self.nav_time)
+                                    self.orders.append(Order(True, RequestType('WAIT')))
+
+                                elif currentShip.fuel.current * 2 <= currentShip.fuel.capacity: # refuel
+                                    print("dock, refuel, orbit")
+                                    # dock
+                                    self.orders.append(Order(True, RequestType("DOCK_SHIP"), 
+                                                                shipSymbol=currentShip.symbol, 
+                                                                url=self.dockURL, 
+                                                                headers=self.headersAuthJsonAccept))
+                                    # refuel
+                                    self.orders.append(Order(True, RequestType("REFUEL_SHIP"), 
+                                                                shipSymbol=currentShip.symbol, 
+                                                                url=self.refuelURL, 
+                                                                headers=self.headersAuthJsonAccept))
+                                    # orbit
+                                    self.orders.append(Order(True, RequestType("ORBIT_SHIP"), 
+                                                                shipSymbol=currentShip.symbol, 
+                                                                url=self.orbitURL, 
+                                                                headers=self.headersAuthJsonAccept))
+                                    
+                                elif currentShip.cargo.capacity - currentShip.cargo.units > 0: # cargo not full
+                                    if self.current_laser_timer >= self.laser_time:
+                                        if currentShip.nav.status != "IN_ORBIT":
+                                            self.orders.append(Order(True, RequestType("ORBIT_SHIP"), 
+                                                                    shipSymbol=currentShip.symbol, 
+                                                                    url=self.orbitURL, 
+                                                                    headers=self.headersAuthJsonAccept))
+                                        self.orders.append(Order(True, RequestType("EXTRACT_RESOURCES"), 
+                                                                    shipSymbol=currentShip.symbol, 
+                                                                    url=currentShip.getURLWithVerb("extract"), 
+                                                                    headers=self.headersAuthJsonAccept))
+                                        #self.orders.append(Order(False, RequestType("GET_SHIP_COOLDOWN"), shipSymbol=currentShip.symbol, url=self.cooldownURL, headers=self.headersAuthAccept))
+                                    else:
+                                        # nothing to do for the moment (wait timer to come to his end) but if multiple mining drone, will see
+                                        print("add a wait time for 0.5 s.")
+                                        self.orders.append(Order(True, RequestType('WAIT')))
+                                
+                                else : # cargo plein
+                                    fullOfContractOre, sellDatas = currentShip.getSellDatas(researchedOre=contract.getContractDeliverSymbols())
+
+                                    if fullOfContractOre: # TODO : si contient que contrat, navigate to contract, Get Ship Nav
+                                        print("going to contract location ?")
+                                        contractWaypoint = contract.getWayPointForDeliverThis(contract.getContractDeliverSymbols()[0])
+                                        if contractWaypoint != None:
+                                            self.updateDataNavigateShip(contractWaypoint)
+                                            print(self.dataNavigateShip)
+                                            self.orders.append(Order(True, RequestType("NAVIGATE_SHIP"), 
+                                                                    shipSymbol=currentShip.symbol,
+                                                                    url=self.navigateURL,
+                                                                    headers=self.headersAuthJsonAccept, 
+                                                                    json=self.dataNavigateShip))
+                                            
+                                            self.orders.append(Order(False, RequestType("GET_SHIP_NAV"), 
+                                                                    shipSymbol=currentShip.symbol, 
+                                                                    url=currentShip.getNavShipURL, 
+                                                                    headers=self.headersAuthAccept))
+                                        else :
+                                            print("contract waypoint didn't find. TODO : désactiver le mode auto")
+                                        
+                                    else : # TODO : si cargo plein mais contient autre matériaux que contrat : dock, vendre tout sauf contract, orbit, mine,GET_SHIP_COOLDOWN
+                                        self.orders.append(Order(True, RequestType("DOCK_SHIP"), 
+                                                                shipSymbol=currentShip.symbol, 
+                                                                url=self.dockURL, 
+                                                                headers=self.headersAuthJsonAccept))
+                                        
+                                        for data in sellDatas:
+                                            self.orders.append(Order(True, RequestType("SELL_CARGO"), 
+                                                                        shipSymbol=currentShip.symbol, 
+                                                                        url=currentShip.sellURL, 
+                                                                        headers=self.headersAuthJsonAccept,
+                                                                        json=data))
+                                            
+                                        self.orders.append(Order(True, RequestType("ORBIT_SHIP"), 
+                                                                shipSymbol=currentShip.symbol, 
+                                                                url=self.orbitURL, 
+                                                                headers=self.headersAuthJsonAccept))
+                                        
+                                        self.orders.append(Order(True, RequestType("EXTRACT_RESOURCES"), 
+                                                                shipSymbol=currentShip.symbol, 
+                                                                url=currentShip.getURLWithVerb("extract"), 
+                                                                headers=self.headersAuthJsonAccept))
+                                                                                 
+                # continue
 
             if event == "MAP":
                 # update button display
@@ -793,9 +1171,10 @@ class SpaceTrader:
                     
                 if len(self.contracts) != 0:
                     if (systemInfo == ""):
-                        self.orders.append(Order(False, RequestType('GET_SYSTEM'), self.getURLSystems(self.getSystemFromWayPoint(self.contracts[0].terms.deliver[0].destinationSymbol)), headers=self.headersAuthAccept))
+                        self.orders.append(Order(False, RequestType('GET_SYSTEM'), url=self.getURLSystems(self.getSystemFromWayPoint(self.contracts[0].terms.deliver[0].destinationSymbol)), headers=self.headersAuthAccept))
                 else :
-                    self.orders.append(Order(False, RequestType('GET_SYSTEM'), self.getURLSystems(self.getSystemFromWayPoint(self.agent.headquarters)), headers=self.headersAuthAccept))
+                    self.orders.append(Order(False, RequestType('GET_SYSTEM'), url=self.getURLSystems(self.getSystemFromWayPoint(self.agent.headquarters)), headers=self.headersAuthAccept))
+            
             if event == "MIDDLE_FLEET":
                 # TODO : afficher les infos sur la fleet
                 self.windowMainScene['MIDDLE_FLEET'].update(button_color = button_color_selected)

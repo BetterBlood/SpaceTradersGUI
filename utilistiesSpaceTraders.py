@@ -1,6 +1,10 @@
 from enum import EnumMeta, Enum
 import requests
 import json
+from datetime import datetime as dt
+from datetime import timezone as tz
+from dateutil import parser
+import pytz
 
 token = ""
 https = "https://api.spacetraders.io/v2"
@@ -40,6 +44,9 @@ dataBuyShip = {
     "shipType": "",
     "waypointSymbol": ""
 }
+dataNavigateShip = {
+    "waypointSymbol": ""
+}
 
 dataJsonExample = {
     "data": [
@@ -53,7 +60,26 @@ uniqueDataJsonExample = {
     "username": "userTest",
     "token": "tokenTest"
 }
+dataDeliverCargo = {
+    "shipSymbol": "",
+    "tradeSymbol": "",
+    "units": "0"
+}
 
+"""
+return (hours, minutes)
+"""
+def extractTimeGap(localDate):
+    gap = localDate[-6:]
+    #print(gap)
+    #print(gap[3])
+    return (int(gap[0] + gap[1:3]), int(gap[0] + gap[4:6]))
+    if gap[0] == "+":
+        #print("plus")
+        return (int(gap[1:3]), int(gap[4:6]))
+    else :
+        #print("minus")
+        return (-int(gap[1:3]), -int(gap[4:6]))
 
 class MetaEnum(EnumMeta):
     def __contains__(self, other):
@@ -84,6 +110,15 @@ class Faction(str, Enum, metaclass=MetaEnum):
     ANCIENTS = 'ANCIENTS'
     SHADOW = 'SHADOW'
     ETHEREAL = 'ETHEREAL'
+
+"""
+Exceptions
+"""
+
+class JsonEmptyError(Exception):
+    def __str__ (self):
+        return "{0} {1}".format(self.__doc__, Exception.__str__(self))
+
 
 """
 utilities
@@ -172,6 +207,25 @@ class Contract:
         self.fulfilled = jsonInfo['fulfilled']
         self.expiration = jsonInfo['expiration']
         self.deadlineToAccept = jsonInfo['deadlineToAccept']
+        self.deliverURL = contractURL + "/" + str(self.id) + "/deliver"
+    
+    def getContractDeliverSymbols(self):
+        datas = []
+        for deliverInfo in self.terms.deliver:
+            datas.append(deliverInfo.tradeSymbol)
+        return datas
+    
+    def getContractDeliverWayPoints(self):
+        datas = []
+        for deliverInfo in self.terms.deliver:
+            datas.append(deliverInfo.destinationSymbol)
+        return datas
+    
+    def getWayPointForDeliverThis(self, tradeSymbol):
+        for deliverInfo in self.terms.deliver:
+            if deliverInfo.tradeSymbol == tradeSymbol:
+                return deliverInfo.destinationSymbol
+        return None
 
 """
 Fleet necessities :
@@ -200,6 +254,31 @@ class Route:
         self.destination = WayPoint(jsonInfo['destination'])
         self.arrival = jsonInfo['arrival']
         self.departureTime = jsonInfo['departureTime']
+    
+    def getDiffFromRouteTime(self):
+        return int((parser.isoparse(self.arrival) - parser.isoparse(self.departureTime)).total_seconds())
+    
+    def getDiffFromRouteTimeArrival(self):
+        #print(pytz.all_timezones)
+        #dat = dt.now(tz.utc)
+        #print("now", str(dat)[0:19])
+        #print(dt.strptime(str(dat)[0:19], '%Y-%m-%d %H:%M:%S'))
+        #print("with astimezone", dat.astimezone())
+        #print("with isoformat", dat.astimezone().isoformat())
+        #print("self.arrival", self.arrival)
+        #print("ari", str(parser.isoparse(self.arrival).astimezone())[0:19])
+        #print(dt.strptime(str(parser.isoparse(self.arrival).astimezone())[0:19], '%Y-%m-%d %H:%M:%S'))
+        print(parser.isoparse(self.arrival).astimezone())
+        arrivalTime = dt.strptime(str(parser.isoparse(self.arrival).astimezone())[0:19], '%Y-%m-%d %H:%M:%S') # jarte les infos de la time zone
+        
+        print(dt.now(tz.utc))
+        nowTime = dt.strptime(str(dt.now(tz.utc))[0:19], '%Y-%m-%d %H:%M:%S')
+        hoursGap, minutsGap = extractTimeGap(str(parser.isoparse(self.arrival).astimezone()))
+        print("gap :", hoursGap, "hours,", minutsGap, "minuts")
+
+        print ("arrival", arrivalTime)
+        print ("nowTime", nowTime)
+        return int((arrivalTime - nowTime).total_seconds()) - hoursGap*3600 - minutsGap*60
 
 class Nav:
     def __init__(self, jsonInfo):
@@ -208,6 +287,9 @@ class Nav:
         self.route = Route(jsonInfo['route'])
         self.status = jsonInfo['status']
         self.flightMode = jsonInfo['flightMode']
+
+    def getDiffFromRouteTime(self):
+        return self.route.getDiffFromRouteTime()
 
 class Crew:
     def __init__(self, jsonInfo):
@@ -359,6 +441,52 @@ class Ship:
 
         self.registration = Registration(jsonInfo['registration'])
         self.cargo = Cargo(jsonInfo['cargo'])
+
+        self.myShipsURL = https + "/my/ships" + "/" + self.symbol
+        self.extractURL = self.myShipsURL + "/extract"
+        self.cargoURL = self.myShipsURL + "/cargo"
+        self.dockURL = self.myShipsURL + "/dock"
+        self.orbitURL = self.myShipsURL + "/orbit"
+        self.sellURL = self.myShipsURL + "/sell"
+        self.purchaseURL = self.myShipsURL + "/purchase" 
+        self.refuelURL = self.myShipsURL + "/refuel"
+        self.navigateURL = self.myShipsURL + "/navigate"
+        self.getNavShipURL = self.myShipsURL + "/nav"
+    
+    def getURLWithVerb(self, verb):
+        return self.myShipsURL + "/" + verb
+    
+    def isAbleToNavTo(self, waypoint):
+        print("isAbleToNavTo() in Ship : not implemented, return always True")
+        return True # TODO : verif CD + fuel
+
+    def isAbleToExtractAt(self, waypoint=None):
+        if waypoint is None:
+            print("isAbleToExtractAt() in Ship : not implemented when waypoint is not given, return always True")
+            return True # TODO : verif CD + laser mount + (orbit ?)
+        else :
+            print("isAbleToExtractAt() in Ship : not implemented when waypoint is given, return always True")
+            return True # TODO : verif CD + laser mount + ship at waypoint + (orbit ?)
+    
+    def updateCDExtract(self, newValue):
+        # TODO : as main
+        self.exctarctCD = newValue
+
+    def getSellDatas(self, researchedOre = []):
+        fullOfContractOre = True
+        datas = []
+
+        for inv in self.cargo.inventory:
+            # si cargo contient des truc différent que contrat :
+            if (inv.symbol not in researchedOre):
+                # vendre tout ce qui n'est pas dans le contrat
+                datas.append('{"symbol": "' + inv.symbol + '", "units": "' + str(inv.units) + '"}')
+                fullOfContractOre = False
+
+        return fullOfContractOre, datas
+    
+    def getDiffFromRouteTime(self):
+        return self.nav.getDiffFromRouteTime()
         
 """
 Systems necessities :
@@ -379,6 +507,45 @@ class System:
         self.factions = []
         for i in range(len(jsonInfo['factions'])):
             self.factions.append(jsonInfo['factions'][i])
+    
+    def getShipyards(self): # deprecated
+        print("getShipyards() in System : deprecated, should use getWaypointsWithTypes([\"SHIPYARD\"])")
+        shipyards = []
+        for waypoint in self.wayPoints:
+            for trait in waypoint.traits:
+                if trait.type == "SHIPYARD":
+                    shipyards.append(waypoint)
+        return shipyards
+
+    def getWaypointsWithTypes(self, types: list[str] = []):
+        if len(types) == 0:
+            return []
+        
+        waypointsType = []
+        for waypoint in self.wayPoints:
+            if (waypoint.type in types):
+                waypointsType.append(waypoint)
+        return waypointsType
+        
+    def getWaypointsWithTraits(self, traitsSymbol: list[str] = []):
+        if len(traitsSymbol) == 0:
+            return []
+        
+        waypointsTraits = []
+        for waypoint in self.wayPoints:
+            for trait in waypoint.traits:
+                if trait.symbol in traitsSymbol:
+                    waypointsTraits.append(waypoint)
+                    break # don't need to add the same waypoint multiple times
+        return waypointsTraits
+
+class Univers:
+    def __init__(self):
+        self.systems = []
+        self.currentSystem = None
+    
+    def updateCurrSys(self, system: System):
+        self.systems.append(system)
 
 """
 Factions necessities :
@@ -449,22 +616,29 @@ class RequestType(str, Enum):
     GET_MARKET = 'GET_MARKET'
     GET_SHIPYARD = 'GET_SHIPYARD'
     GET_JUMP_GATE = 'GET_JUMP_GATE'
+    WAIT = 'WAIT'
 
 
 class Order:
-    def __init__(self, isPost=True, requestType='GET_STATUS', url="", headers="", json=""):
-        self.requestType = requestType
+    def __init__(self, isPost=True, requestType='GET_STATUS', shipSymbol="", url="", headers="", json=""):
         self.isPost = isPost
+        self.requestType = requestType
+        self.shipSymbol = shipSymbol
         self.url = url
         self.headers = headers
         self.json = json
     
     def doRequest(self):
+        if self.requestType == "WAIT":
+            return "wait"
         if self.isPost :
-            return requests.post((self.url), headers=self.headers, json=self.json)
+            if (self.json == ""):
+                return requests.post(self.url, headers=self.headers)
+            else :
+                return requests.post(self.url, headers=self.headers, json=self.json)
         else:
-            return requests.get((self.url), headers=self.headers)
+            return requests.get(self.url, headers=self.headers)
     
     def displayContent(self):
-        print(self.isPost, self.url, self.headers, self.json)
+        print(self.isPost, self.requestType, self.shipSymbol, self.url, self.headers, self.json)
 
